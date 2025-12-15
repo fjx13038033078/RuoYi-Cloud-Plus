@@ -1,0 +1,164 @@
+package org.dromara.system.controller.system;
+
+import cn.dev33.satoken.annotation.SaCheckPermission;
+import cn.idev.excel.EasyExcel;
+import cn.idev.excel.write.style.column.LongestMatchColumnWidthStyleStrategy;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import lombok.RequiredArgsConstructor;
+import org.dromara.common.core.domain.R;
+import org.dromara.common.core.validate.AddGroup;
+import org.dromara.common.core.validate.EditGroup;
+import org.dromara.common.excel.utils.ExcelUtil;
+import org.dromara.common.idempotent.annotation.RepeatSubmit;
+import org.dromara.common.log.annotation.Log;
+import org.dromara.common.log.enums.BusinessType;
+import org.dromara.common.mybatis.core.page.PageQuery;
+import org.dromara.common.mybatis.core.page.TableDataInfo;
+import org.dromara.common.web.core.BaseController;
+import org.dromara.system.domain.CameraManagement;
+import org.dromara.system.domain.bo.CameraManagementBo;
+import org.dromara.system.domain.vo.CameraImportExcelVo;
+import org.dromara.system.domain.vo.CameraManagementVo;
+import org.dromara.system.service.ICameraManagementService;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 执法视频信息管理
+ * 前端访问路由地址为:/system/management
+ *
+ * @author LionLi
+ * @date 2025-12-05
+ */
+@Validated
+@RequiredArgsConstructor
+@RestController
+@RequestMapping("/camera/management")
+public class CameraManagementController extends BaseController {
+
+    private final ICameraManagementService cameraManagementService;
+
+    /**
+     * 查询执法视频信息管理列表
+     */
+    @SaCheckPermission("system:management:list")
+    @GetMapping("/list")
+    public TableDataInfo<CameraManagementVo> list(CameraManagementBo bo, PageQuery pageQuery) {
+        return cameraManagementService.queryPageList(bo, pageQuery);
+    }
+
+    /**
+     * 导出执法视频信息管理列表
+     */
+    @SaCheckPermission("system:management:export")
+    @Log(title = "执法视频信息管理", businessType = BusinessType.EXPORT)
+    @PostMapping("/export")
+    public void export(CameraManagementBo bo, HttpServletResponse response) {
+        List<CameraManagementVo> list = cameraManagementService.queryList(bo);
+        ExcelUtil.exportExcel(list, "执法视频信息管理", CameraManagementVo.class, response);
+    }
+
+//    /**
+//     * 获取执法视频信息管理详细信息
+//     * @param file 文件
+//     * @return 执法视频信息管理
+//     */
+//    @SaCheckPermission("system:management:import")
+//    @Log(title = "执法视频信息管理", businessType = BusinessType.IMPORT)
+//    @PostMapping("/import")
+//    public R<List<CameraManagement>> importData(@RequestParam("file") MultipartFile file){
+//        try {
+//            List<CameraManagement> results = cameraManagementService.importFromExcel(file);
+//            return R.ok(results);
+//        } catch (Exception e) {
+//            return R.fail("导入失败: " + e.getMessage());
+//        }
+//    }
+
+    @SaCheckPermission("system:management:scanInsert")
+    @Log(title = "执法视频信息管理", businessType = BusinessType.IMPORT)
+    @PostMapping("/scanInsert")
+    public R<List<CameraManagement>> scanInsert(@RequestParam("folderPath") String folderPath) {
+        try {
+            List<CameraManagement> results = cameraManagementService.scanInsertFromFolder(folderPath);
+            return R.ok(results);
+        } catch (Exception e) {
+            return R.fail("扫描导入失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 下载导入模板
+     */
+    @GetMapping("/downloadTemplate")
+    public void downloadTemplate(HttpServletResponse response) throws IOException {
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        String fileName = URLEncoder.encode("执法视频导入模板", StandardCharsets.UTF_8).replaceAll("\\+", "%20");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + fileName + ".xlsx");
+
+        // 创建空数据列表，只生成表头
+        List<CameraImportExcelVo> list = new ArrayList<>();
+
+        EasyExcel.write(response.getOutputStream(), CameraImportExcelVo.class)
+            .registerWriteHandler(new LongestMatchColumnWidthStyleStrategy()) // 自动列宽
+            .sheet("模板")
+            .doWrite(list);
+    }
+
+
+    /**
+     * 获取执法视频信息管理详细信息
+     *
+     * @param videoId 主键
+     */
+    @SaCheckPermission("system:management:query")
+    @GetMapping("/{videoId}")
+    public R<CameraManagementVo> getInfo(@NotNull(message = "主键不能为空")
+                                         @PathVariable("videoId") Long videoId) {
+        return R.ok(cameraManagementService.queryById(videoId));
+    }
+
+    /**
+     * 新增执法视频信息管理
+     */
+    @SaCheckPermission("system:management:add")
+    @Log(title = "执法视频信息管理", businessType = BusinessType.INSERT)
+    @RepeatSubmit()
+    @PostMapping()
+    public R<Void> add(@Validated(AddGroup.class) @RequestBody CameraManagementBo bo) {
+        return toAjax(cameraManagementService.insertByBo(bo));
+    }
+
+    /**
+     * 修改执法视频信息管理
+     */
+    @SaCheckPermission("system:management:edit")
+    @Log(title = "执法视频信息管理", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PutMapping()
+    public R<Void> edit(@Validated(EditGroup.class) @RequestBody CameraManagementBo bo) {
+        return toAjax(cameraManagementService.updateByBo(bo));
+    }
+
+    /**
+     * 删除执法视频信息管理
+     *
+     * @param videoIds 主键串
+     */
+    @SaCheckPermission("system:management:remove")
+    @Log(title = "执法视频信息管理", businessType = BusinessType.DELETE)
+    @DeleteMapping("/{videoIds}")
+    public R<Void> remove(@NotEmpty(message = "主键不能为空")
+                          @PathVariable("videoIds") Long[] videoIds) {
+        return toAjax(cameraManagementService.deleteWithValidByIds(List.of(videoIds), true));
+    }
+}
