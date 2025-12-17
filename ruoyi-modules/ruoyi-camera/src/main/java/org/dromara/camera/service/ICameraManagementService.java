@@ -1,10 +1,10 @@
-package org.dromara.system.service;
+package org.dromara.camera.service;
 
+import org.dromara.camera.domain.CameraManagement;
+import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
-import org.dromara.system.domain.CameraManagement;
-import org.dromara.system.domain.bo.CameraManagementBo;
-import org.dromara.system.domain.vo.CameraManagementVo;
+import org.dromara.camera.domain.bo.CameraManagementBo;
 
 import java.util.Collection;
 import java.util.List;

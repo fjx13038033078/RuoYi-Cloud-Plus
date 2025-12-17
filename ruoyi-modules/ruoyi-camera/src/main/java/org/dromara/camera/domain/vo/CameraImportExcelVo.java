@@ -1,4 +1,4 @@
-package org.dromara.system.domain.vo;
+package org.dromara.camera.domain.vo;
 
 import cn.idev.excel.annotation.ExcelProperty;
 import lombok.Data;

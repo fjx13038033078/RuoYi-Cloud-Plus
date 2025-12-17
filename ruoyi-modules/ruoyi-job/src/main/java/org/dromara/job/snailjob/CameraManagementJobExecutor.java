@@ -6,7 +6,7 @@ import com.aizuda.snailjob.client.job.core.executor.AbstractJobExecutor;
 import com.aizuda.snailjob.model.dto.ExecuteResult;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
-import org.dromara.system.service.ICameraManagementDubboService;
+import org.dromara.camera.service.ICameraManagementDubboService;
 import org.springframework.stereotype.Component;
 
 /**

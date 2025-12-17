@@ -9,10 +9,10 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>ruoyi-job</artifactId>
+    <artifactId>ruoyi-camera</artifactId>
 
     <description>
-        ruoyi-job 任务调度模块
+        ruoyi-camera 摄像头模块
     </description>
 
     <dependencies>
@@ -30,12 +30,17 @@
 
         <dependency>
             <groupId>org.dromara</groupId>
-            <artifactId>ruoyi-common-web</artifactId>
+            <artifactId>ruoyi-common-service-impl</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.dromara</groupId>
-            <artifactId>ruoyi-common-dubbo</artifactId>
+            <artifactId>ruoyi-common-doc</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-common-web</artifactId>
         </dependency>
 
         <dependency>
@@ -45,18 +50,22 @@
 
         <dependency>
             <groupId>org.dromara</groupId>
-            <artifactId>ruoyi-common-job</artifactId>
+            <artifactId>ruoyi-common-dubbo</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-common-seata</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-common-idempotent</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.dromara</groupId>
             <artifactId>ruoyi-common-tenant</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.dromara</groupId>
-                    <artifactId>ruoyi-common-mybatis</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
         <dependency>
@@ -64,16 +73,36 @@
             <artifactId>ruoyi-common-security</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-common-translation</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-common-sensitive</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-common-encrypt</artifactId>
+        </dependency>
+
         <!-- RuoYi Api System -->
         <dependency>
             <groupId>org.dromara</groupId>
             <artifactId>ruoyi-api-system</artifactId>
         </dependency>
+
         <dependency>
             <groupId>org.dromara</groupId>
-            <artifactId>ruoyi-camera</artifactId>
-            <version>2.5.1</version>
-            <scope>compile</scope>
+            <artifactId>ruoyi-api-resource</artifactId>
+        </dependency>
+
+        <!-- RuoYi Api System -->
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-api-workflow</artifactId>
         </dependency>
 
     </dependencies>

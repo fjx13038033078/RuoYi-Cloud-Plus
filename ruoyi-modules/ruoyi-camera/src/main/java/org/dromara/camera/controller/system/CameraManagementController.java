@@ -1,4 +1,4 @@
-package org.dromara.system.controller.system;
+package org.dromara.camera.controller.system;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.idev.excel.EasyExcel;
@@ -7,6 +7,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
+import org.dromara.camera.domain.CameraManagement;
+import org.dromara.camera.domain.vo.CameraImportExcelVo;
+import org.dromara.camera.domain.vo.CameraManagementVo;
+import org.dromara.camera.service.ICameraManagementService;
 import org.dromara.common.core.domain.R;
 import org.dromara.common.core.validate.AddGroup;
 import org.dromara.common.core.validate.EditGroup;
@@ -17,11 +21,7 @@ import org.dromara.common.log.enums.BusinessType;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.common.web.core.BaseController;
-import org.dromara.system.domain.CameraManagement;
-import org.dromara.system.domain.bo.CameraManagementBo;
-import org.dromara.system.domain.vo.CameraImportExcelVo;
-import org.dromara.system.domain.vo.CameraManagementVo;
-import org.dromara.system.service.ICameraManagementService;
+import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 

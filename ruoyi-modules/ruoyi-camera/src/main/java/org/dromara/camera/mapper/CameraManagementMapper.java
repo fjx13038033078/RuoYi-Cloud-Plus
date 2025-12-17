@@ -1,7 +1,7 @@
-package org.dromara.system.mapper;
+package org.dromara.camera.mapper;
 
-import org.dromara.system.domain.CameraManagement;
-import org.dromara.system.domain.vo.CameraManagementVo;
+import org.dromara.camera.domain.CameraManagement;
+import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.common.mybatis.core.mapper.BaseMapperPlus;
 
 /**

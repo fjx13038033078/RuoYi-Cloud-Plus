@@ -1,63 +1,68 @@
-package org.dromara.system.domain;
+package org.dromara.camera.domain.bo;
 
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableLogic;
-import com.baomidou.mybatisplus.annotation.TableName;
+import io.github.linpeilie.annotations.AutoMapper;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.dromara.common.tenant.core.TenantEntity;
+import org.dromara.camera.domain.CameraManagement;
+import org.dromara.common.core.validate.AddGroup;
+import org.dromara.common.core.validate.EditGroup;
+import org.dromara.common.mybatis.core.domain.BaseEntity;
 
-import java.io.Serial;
 import java.util.Date;
 
 /**
- * 执法视频信息管理对象 camera_management
+ * 执法视频信息管理业务对象 camera_management
  *
  * @author LionLi
  * @date 2025-12-09
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("camera_management")
-public class CameraManagement extends TenantEntity {
-
-    @Serial
-    private static final long serialVersionUID = 1L;
+@AutoMapper(target = CameraManagement.class, reverseConvertGenerate = false)
+public class CameraManagementBo extends BaseEntity {
 
     /**
      * 视频ID（唯一标识）
      */
-    @TableId(value = "video_id")
+    @NotNull(message = "视频ID（唯一标识）不能为空", groups = {EditGroup.class})
     private Long videoId;
 
     /**
      * 来源设备
      */
+    @NotBlank(message = "来源设备不能为空", groups = {AddGroup.class, EditGroup.class})
     private String deviceId;
 
     /**
      * 用户编号执法人员编号（采集者/使用者）
      */
+    @NotBlank(message = "用户编号执法人员编号（采集者/使用者）不能为空", groups = {AddGroup.class, EditGroup.class})
     private String userCode;
 
     /**
      * 用户姓名
      */
+    @NotBlank(message = "用户姓名不能为空", groups = {AddGroup.class, EditGroup.class})
     private String userName;
 
     /**
      * 上传时间（入库时间戳）
      */
+    @NotNull(message = "上传时间（入库时间戳）不能为空", groups = {AddGroup.class, EditGroup.class})
     private Date uploadTime;
 
     /**
      * 单位编号
      */
+    @NotNull(message = "单位编号不能为空", groups = {AddGroup.class, EditGroup.class})
     private Long deptId;
 
     /**
      * 拍摄时间（视频实际拍摄时间）
      */
+    @NotNull(message = "拍摄时间（视频实际拍摄时间）不能为空", groups = {AddGroup.class, EditGroup.class})
     private Date shootTime;
 
     /**
@@ -78,6 +83,7 @@ public class CameraManagement extends TenantEntity {
     /**
      * 存储位置（对象存储URL/文件系统路径）
      */
+    @NotBlank(message = "存储位置（对象存储URL/文件系统路径）不能为空", groups = {AddGroup.class, EditGroup.class})
     private String storageLocation;
 
     /**
@@ -105,9 +111,5 @@ public class CameraManagement extends TenantEntity {
      */
     private Long dataStatus;
 
-    /**
-     * 删除标志（0代表存在 2代表删除）
-     */
-    @TableLogic
-    private Long delFlag;
+
 }

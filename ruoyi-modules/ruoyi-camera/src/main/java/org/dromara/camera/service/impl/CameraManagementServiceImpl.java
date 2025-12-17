@@ -1,4 +1,4 @@
-package org.dromara.system.service.impl;
+package org.dromara.camera.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -6,15 +6,15 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
+import org.dromara.camera.domain.CameraManagement;
+import org.dromara.camera.domain.vo.CameraManagementVo;
+import org.dromara.camera.mapper.CameraManagementMapper;
+import org.dromara.camera.service.ICameraManagementService;
 import org.dromara.common.core.utils.MapstructUtils;
 import org.dromara.common.core.utils.StringUtils;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
-import org.dromara.system.domain.CameraManagement;
-import org.dromara.system.domain.bo.CameraManagementBo;
-import org.dromara.system.domain.vo.CameraManagementVo;
-import org.dromara.system.mapper.CameraManagementMapper;
-import org.dromara.system.service.ICameraManagementService;
+import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

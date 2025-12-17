@@ -1,11 +1,11 @@
-package org.dromara.system.service.impl;
+package org.dromara.camera.service.impl;
 
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
-import org.dromara.system.domain.CameraManagement;
-import org.dromara.system.service.ICameraManagementDubboService;
-import org.dromara.system.service.ICameraManagementService;
+import org.dromara.camera.domain.CameraManagement;
+import org.dromara.camera.service.ICameraManagementDubboService;
+import org.dromara.camera.service.ICameraManagementService;
 import org.springframework.stereotype.Service;
 
 import java.util.List;

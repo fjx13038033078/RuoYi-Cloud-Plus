@@ -1,6 +1,6 @@
-package org.dromara.system.service;
+package org.dromara.camera.service;
 
-import org.dromara.system.domain.CameraManagement;
+import org.dromara.camera.domain.CameraManagement;
 
 import java.util.List;
 
