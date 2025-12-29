@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.dromara.camera.domain.CameraManagement;
+import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraImportExcelVo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.camera.service.ICameraManagementService;
@@ -21,15 +22,16 @@ import org.dromara.common.log.enums.BusinessType;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.common.web.core.BaseController;
-import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 执法视频信息管理
@@ -49,7 +51,7 @@ public class CameraManagementController extends BaseController {
     /**
      * 查询执法视频信息管理列表
      */
-    @SaCheckPermission("system:management:list")
+    @SaCheckPermission("camera:management:list")
     @GetMapping("/list")
     public TableDataInfo<CameraManagementVo> list(CameraManagementBo bo, PageQuery pageQuery) {
         return cameraManagementService.queryPageList(bo, pageQuery);
@@ -58,7 +60,7 @@ public class CameraManagementController extends BaseController {
     /**
      * 导出执法视频信息管理列表
      */
-    @SaCheckPermission("system:management:export")
+    @SaCheckPermission("camera:management:export")
     @Log(title = "执法视频信息管理", businessType = BusinessType.EXPORT)
     @PostMapping("/export")
     public void export(CameraManagementBo bo, HttpServletResponse response) {
@@ -83,7 +85,7 @@ public class CameraManagementController extends BaseController {
 //        }
 //    }
 
-    @SaCheckPermission("system:management:scanInsert")
+    @SaCheckPermission("camera:management:scanInsert")
     @Log(title = "执法视频信息管理", businessType = BusinessType.IMPORT)
     @PostMapping("/scanInsert")
     public R<List<CameraManagement>> scanInsert(@RequestParam("folderPath") String folderPath) {
@@ -98,6 +100,7 @@ public class CameraManagementController extends BaseController {
     /**
      * 下载导入模板
      */
+    @SaCheckPermission("camera:management:downloadTemplate")
     @GetMapping("/downloadTemplate")
     public void downloadTemplate(HttpServletResponse response) throws IOException {
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -120,7 +123,7 @@ public class CameraManagementController extends BaseController {
      *
      * @param videoId 主键
      */
-    @SaCheckPermission("system:management:query")
+    @SaCheckPermission("camera:management:query")
     @GetMapping("/{videoId}")
     public R<CameraManagementVo> getInfo(@NotNull(message = "主键不能为空")
                                          @PathVariable("videoId") Long videoId) {
@@ -130,7 +133,7 @@ public class CameraManagementController extends BaseController {
     /**
      * 新增执法视频信息管理
      */
-    @SaCheckPermission("system:management:add")
+    @SaCheckPermission("camera:management:add")
     @Log(title = "执法视频信息管理", businessType = BusinessType.INSERT)
     @RepeatSubmit()
     @PostMapping()
@@ -141,7 +144,7 @@ public class CameraManagementController extends BaseController {
     /**
      * 修改执法视频信息管理
      */
-    @SaCheckPermission("system:management:edit")
+    @SaCheckPermission("camera:management:edit")
     @Log(title = "执法视频信息管理", businessType = BusinessType.UPDATE)
     @RepeatSubmit()
     @PutMapping()
@@ -154,11 +157,25 @@ public class CameraManagementController extends BaseController {
      *
      * @param videoIds 主键串
      */
-    @SaCheckPermission("system:management:remove")
+    @SaCheckPermission("camera:management:remove")
     @Log(title = "执法视频信息管理", businessType = BusinessType.DELETE)
     @DeleteMapping("/{videoIds}")
     public R<Void> remove(@NotEmpty(message = "主键不能为空")
                           @PathVariable("videoIds") Long[] videoIds) {
         return toAjax(cameraManagementService.deleteWithValidByIds(List.of(videoIds), true));
+    }
+
+    @SaCheckPermission("camera:management:upload")
+    @PostMapping("/upload")
+    public  R<Map<String, Object>> uploadVideo(@RequestParam("file") MultipartFile file) {
+        try {
+            // 直接调用外部服务
+            Map<String, Object> result = cameraManagementService.analyzeVideo(file);
+            return R.ok("视频分析成功", result);
+        } catch (IllegalArgumentException e) {
+            return R.fail(e.getMessage());
+        } catch (Exception e) {
+            return R.fail("视频分析失败: " + e.getMessage());
+        }
     }
 }

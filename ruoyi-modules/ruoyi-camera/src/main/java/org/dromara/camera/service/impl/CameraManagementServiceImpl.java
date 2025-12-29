@@ -3,10 +3,13 @@ package org.dromara.camera.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
 import org.dromara.camera.domain.CameraManagement;
+import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.camera.mapper.CameraManagementMapper;
 import org.dromara.camera.service.ICameraManagementService;
@@ -14,15 +17,18 @@ import org.dromara.common.core.utils.MapstructUtils;
 import org.dromara.common.core.utils.StringUtils;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
-import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -44,6 +50,12 @@ import static org.springframework.web.util.UriUtils.extractFileExtension;
 public class CameraManagementServiceImpl implements ICameraManagementService {
 
     private final CameraManagementMapper baseMapper;
+
+    private final ExternalAnalysisClient externalAnalysisClient;
+
+    private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList("mp4", "avi", "mov", "wmv", "flv", "mkv");
+
+    private static final long MAX_FILE_SIZE = 500 * 1024 * 1024;
 
     /**
      * 查询执法视频信息管理
@@ -524,7 +536,7 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
             .orElse(path);
     }
 
-    // ==================== 可选的扩展方法 ====================
+//     ==================== 可选的扩展方法 ====================
 
     /**
      * 从文件路径中提取文件名（不包含路径）
@@ -553,4 +565,195 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
             .orElse(0L);
     }
 
+
+    /**
+     * 分析视频文件
+     * 该方法会对视频文件进行验证，并根据文件大小动态设置超时和重试策略，调用外部服务进行分析
+     *
+     * @param file 上传的视频文件（MultipartFile格式）
+     * @return Map<String, Object> 包含分析结果和文件信息的映射
+     * @throws RuntimeException 当文件验证失败或分析过程中发生错误时抛出
+     */
+    @Override
+    public Map<String, Object> analyzeVideo(MultipartFile file) {
+        // 1. 参数校验 - 验证视频文件的有效性
+        validateVideoFile(file);
+
+        // 根据文件大小动态设置超时和重试策略
+        int maxRetries = calculateRetryCount(file.getSize()); // 计算最大重试次数
+        long timeout = calculateTimeout(file.getSize());      // 计算超时时间
+
+        // 记录分析开始日志，包含文件信息和计算出的策略参数
+        log.info("开始分析视频: {}, 大小: {} MB, 最大重试次数: {}, 超时时间: {}秒",
+            file.getOriginalFilename(),
+            String.format("%.2f", file.getSize() / (1024.0 * 1024.0)),
+            maxRetries,
+            timeout / 1000);
+
+        Exception lastException = null; // 用于记录最后一次异常，用于最终的错误报告
+
+        // 带重试机制的调用 - 循环尝试分析，最多重试maxRetries次
+        for (int retry = 0; retry <= maxRetries; retry++) {
+            try {
+                // 如果是重试（不是第一次尝试），先等待2秒再执行
+                if (retry > 0) {
+                    log.info("第 {} 次重试分析视频", retry);
+                    Thread.sleep(2000); // 重试前等待2秒，避免频繁调用
+                }
+
+                // 2. 直接调用外部服务并返回原始结果
+                String jsonResponse = externalAnalysisClient.analyzeVideoRaw(file);
+
+                // 3. 解析JSON响应为Map对象
+                ObjectMapper objectMapper = new ObjectMapper();
+                // 配置ObjectMapper忽略未知属性，避免解析失败
+                objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+                // 将JSON字符串转换为Map对象
+                Map<String, Object> result = objectMapper.readValue(jsonResponse, Map.class);
+
+                // 4. 添加文件信息到结果中
+                addFileInfo(result, file);
+
+                log.info("视频分析成功: {}", file.getOriginalFilename());
+                return result; // 分析成功，返回结果
+
+            } catch (SocketTimeoutException e) {
+                // 处理超时异常 - 记录日志并决定是否重试
+                lastException = e;
+                log.warn("第 {} 次尝试超时，视频大小: {} MB",
+                    retry + 1,
+                    String.format("%.2f", file.getSize() / (1024.0 * 1024.0)));
+                // 如果已达到最大重试次数，抛出运行时异常
+                if (retry == maxRetries) {
+                    log.error("视频分析超时，已达到最大重试次数", e);
+                    throw new RuntimeException("视频分析超时，请尝试上传较小文件或稍后重试");
+                }
+            } catch (IOException e) {
+                // 处理IO异常 - 记录日志并决定是否重试
+                lastException = e;
+                // 如果已达到最大重试次数，抛出运行时异常
+                if (retry == maxRetries) {
+                    log.error("视频分析失败", e);
+                    throw new RuntimeException("视频分析失败: " + e.getMessage());
+                }
+            } catch (Exception e) {
+                // 处理其他类型的异常 - 直接抛出，不重试
+                log.error("视频分析异常", e);
+                throw new RuntimeException("视频分析失败: " + e.getMessage());
+            }
+        }
+
+        // 所有重试都失败后，抛出运行时异常
+        throw new RuntimeException("视频分析失败: " + (lastException != null ? lastException.getMessage() : "未知错误"));
+    }
+
+    /**
+     * 根据文件大小计算重试次数
+     * 文件越大，需要的重试次数越多，因为大文件上传和分析更容易失败
+     *
+     * @param fileSize 文件大小（字节）
+     * @return 重试次数
+     */
+    private int calculateRetryCount(long fileSize) {
+        if (fileSize > 100 * 1024 * 1024) { // 大于100MB
+            return 3; // 大文件，允许最多3次重试
+        } else if (fileSize > 50 * 1024 * 1024) { // 50-100MB
+            return 2; // 中等文件，允许最多2次重试
+        } else {
+            return 1; // 小文件，允许最多1次重试
+        }
+    }
+
+    /**
+     * 根据文件大小计算超时时间
+     * 文件越大，需要的超时时间越长
+     *
+     * @param fileSize 文件大小（字节）
+     * @return 超时时间（毫秒）
+     */
+    private long calculateTimeout(long fileSize) {
+        // 基本时间 + 根据文件大小增加的额外时间
+        long baseTimeout = 60000; // 60秒基础时间
+        long additionalTimeout = fileSize / (1024 * 1024) * 1000; // 每MB增加1秒
+
+        // 返回计算出的超时时间，但最长不超过10分钟（600000毫秒）
+        return Math.min(baseTimeout + additionalTimeout, 600000);
+    }
+
+    /**
+     * 添加文件信息到分析结果中
+     *
+     * @param result 分析结果Map
+     * @param file   上传的视频文件
+     */
+    private void addFileInfo(Map<String, Object> result, MultipartFile file) {
+        result.put("upload_file_name", file.getOriginalFilename()); // 原始文件名
+        result.put("upload_file_size", formatFileSize(file.getSize())); // 格式化后的文件大小
+        result.put("upload_time", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))); // 上传时间
+        result.put("file_format", getFileExtension(file.getOriginalFilename())); // 文件格式（扩展名）
+        result.put("file_size_bytes", file.getSize()); // 文件大小（字节）
+    }
+
+    /**
+     * 验证视频文件的有效性
+     * 检查文件是否为空、文件名是否有效、文件格式是否支持、文件大小是否超限
+     *
+     * @param file 上传的视频文件
+     * @throws IllegalArgumentException 当文件不符合要求时抛出
+     */
+    private void validateVideoFile(MultipartFile file) {
+        // 检查文件是否为空
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("请选择要上传的视频文件");
+        }
+
+        // 检查文件名是否有效
+        String filename = file.getOriginalFilename();
+        if (filename == null || filename.trim().isEmpty()) {
+            throw new IllegalArgumentException("文件名不能为空");
+        }
+
+        // 检查文件格式是否支持
+        String extension = getFileExtension(filename).toLowerCase();
+        if (!ALLOWED_EXTENSIONS.contains(extension)) {
+            throw new IllegalArgumentException("不支持的文件格式: " + extension);
+        }
+
+        // 检查文件大小是否超限
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new IllegalArgumentException("文件大小不能超过500MB");
+        }
+
+        // 记录验证通过日志（实际检查视频时长的逻辑可根据需要添加）
+        log.info("视频文件验证通过: {}, 大小: {} MB",
+            filename,
+            String.format("%.2f", file.getSize() / (1024.0 * 1024.0)));
+    }
+
+    /**
+     * 获取文件扩展名
+     *
+     * @param filename 文件名
+     * @return 文件扩展名（不含点号），如果无扩展名则返回空字符串
+     */
+    private String getFileExtension(String filename) {
+        int lastDotIndex = filename.lastIndexOf(".");
+        // 确保点号不在开头或结尾
+        return lastDotIndex > 0 && lastDotIndex < filename.length() - 1 ?
+            filename.substring(lastDotIndex + 1) : "";
+    }
+
+    /**
+     * 格式化文件大小，将字节数转换为易读的格式（B/KB/MB/GB）
+     *
+     * @param size 文件大小（字节）
+     * @return 格式化后的文件大小字符串
+     */
+    private String formatFileSize(long size) {
+        if (size < 1024) return size + " B"; // 小于1KB，显示字节
+        if (size < 1024 * 1024) return String.format("%.2f KB", size / 1024.0); // 小于1MB，显示KB
+        if (size < 1024 * 1024 * 1024) return String.format("%.2f MB", size / (1024.0 * 1024.0)); // 小于1GB，显示MB
+        return String.format("%.2f GB", size / (1024.0 * 1024.0 * 1024.0)); // 大于等于1GB，显示GB
+    }
 }
