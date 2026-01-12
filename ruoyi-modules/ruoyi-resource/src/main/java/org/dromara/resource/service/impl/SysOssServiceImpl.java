@@ -24,6 +24,7 @@ import org.dromara.common.oss.factory.OssFactory;
 import org.dromara.resource.domain.SysOss;
 import org.dromara.resource.domain.SysOssExt;
 import org.dromara.resource.domain.bo.SysOssBo;
+import org.dromara.resource.domain.vo.SysOssUploadVo;
 import org.dromara.resource.domain.vo.SysOssVo;
 import org.dromara.resource.mapper.SysOssMapper;
 import org.dromara.resource.service.ISysOssService;
@@ -251,6 +252,31 @@ public class SysOssServiceImpl implements ISysOssService {
             storage.delete(sysOss.getUrl());
         }
         return baseMapper.deleteByIds(ids) > 0;
+    }
+
+    @Override
+    public List<SysOssUploadVo> batchUpload(MultipartFile[] files) {
+        List<SysOssUploadVo> uploadVos = new ArrayList<>();
+
+        for (MultipartFile file : files) {
+            try {
+                // 调用原有的单文件上传逻辑
+                SysOssVo oss = this.upload(file);
+
+                // 构建返回对象
+                SysOssUploadVo uploadVo = new SysOssUploadVo();
+                uploadVo.setUrl(oss.getUrl());
+                uploadVo.setFileName(oss.getOriginalName());
+                uploadVo.setOssId(oss.getOssId().toString());
+
+                uploadVos.add(uploadVo);
+            } catch (Exception e) {
+                // 可以抛出自定义异常，也可以将失败信息包含在返回结果中
+                throw new ServiceException("文件 " + file.getOriginalFilename() + " 上传失败: " + e.getMessage());
+            }
+        }
+
+        return uploadVos;
     }
 
     /**

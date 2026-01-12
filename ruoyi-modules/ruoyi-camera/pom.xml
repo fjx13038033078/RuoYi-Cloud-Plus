@@ -119,6 +119,10 @@
             <version>4.5.13</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.dromara</groupId>
+            <artifactId>ruoyi-common-oss</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

@@ -1,6 +1,7 @@
 package org.dromara.camera.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -8,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.dromara.camera.domain.CameraManagement;
 import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
@@ -15,8 +17,15 @@ import org.dromara.camera.mapper.CameraManagementMapper;
 import org.dromara.camera.service.ICameraManagementService;
 import org.dromara.common.core.utils.MapstructUtils;
 import org.dromara.common.core.utils.StringUtils;
+import org.dromara.common.json.utils.JsonUtils;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
+import org.dromara.common.oss.core.OssClient;
+import org.dromara.common.oss.entity.UploadResult;
+import org.dromara.common.oss.factory.OssFactory;
+import org.dromara.resource.api.RemoteFileService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -36,6 +45,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.baomidou.mybatisplus.extension.toolkit.Db.saveBatch;
+import static java.util.Map.entry;
 import static org.springframework.web.util.UriUtils.extractFileExtension;
 
 /**
@@ -44,12 +54,21 @@ import static org.springframework.web.util.UriUtils.extractFileExtension;
  * @author LionLi
  * @date 2025-12-05
  */
+//@Slf4j
+//@RequiredArgsConstructor
+//@Service
 @Slf4j
 @RequiredArgsConstructor
 @Service
 public class CameraManagementServiceImpl implements ICameraManagementService {
 
     private final CameraManagementMapper baseMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @DubboReference
+    private RemoteFileService remoteFileService; // 注入OSS服务
 
     private final ExternalAnalysisClient externalAnalysisClient;
 
@@ -408,6 +427,13 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
             // 收集：转换为List集合
             .collect(Collectors.toList());
 
+        // ==================== 新增：上传文件到MinIO ====================
+        // 只有在新文件列表不为空时执行上传
+        if (!resultList.isEmpty()) {
+            uploadVideosToMinIO(resultList);
+        }
+        // ==================== 新增结束 ====================
+
         // 使用Optional处理结果，提供更清晰的逻辑分支
         return Optional.of(resultList)
             // 如果结果列表不为空，执行保存操作
@@ -423,6 +449,253 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
                 log.info("所有视频文件已在数据库中存在，无需重复导入");
                 return Collections.emptyList();
             });
+    }
+
+    /**
+     * 新增方法：批量上传视频文件到MinIO
+     * 这个方法将扫描到的视频文件上传到MinIO对象存储，并更新数据库中的URL字段
+     *
+     * @param cameraList 需要上传的视频文件列表
+     */
+    private void uploadVideosToMinIO(List<CameraManagement> cameraList) {
+        try {
+            log.info("开始批量上传视频文件到MinIO，文件数量：{}", cameraList.size());
+
+            OssClient ossClient = OssFactory.instance();
+            if (ossClient == null) {
+                log.error("OssClient未初始化，上传任务终止");
+                return;
+            }
+
+            long successCount = cameraList.stream()
+                .filter(this::isValidVideoFile)
+                .map(camera -> uploadCameraVideo(camera, ossClient))
+                .filter(Objects::nonNull)
+                .count();
+
+            log.info("视频上传完成，成功数量：{}", successCount);
+
+        } catch (Exception e) {
+            log.error("批量上传视频文件到MinIO失败", e);
+        }
+    }
+
+    /**
+     * 检查视频文件是否有效
+     */
+    private boolean isValidVideoFile(CameraManagement camera) {
+        File file = new File(camera.getStorageLocation());
+        boolean isValid = file.exists() && file.isFile();
+        if (!isValid) {
+            log.warn("视频文件无效或不存在：{}", camera.getStorageLocation());
+        }
+        return isValid;
+    }
+
+    /**
+     * 上传单个摄像头视频文件
+     */
+    private CameraManagement uploadCameraVideo(CameraManagement camera, OssClient ossClient) {
+        try {
+            File file = new File(camera.getStorageLocation());
+            String contentType = detectContentType(file);
+            byte[] fileBytes = Files.readAllBytes(file.toPath());
+
+            UploadResult uploadResult = ossClient.uploadSuffix(
+                fileBytes,
+                extractFileSuffix(file),
+                contentType
+            );
+
+            if (uploadResult == null) {
+                log.error("文件上传返回结果为空：{}", file.getName());
+                return null;
+            }
+
+            Long ossId = saveToSysOss(camera, ossClient, file, uploadResult, contentType);
+            if (ossId == null) return null;
+
+            updateCameraRecord(camera, uploadResult, ossId);
+            log.info("文件上传成功：{}，OSS ID：{}", file.getName(), ossId);
+
+            return camera;
+
+        } catch (Exception e) {
+            log.error("上传摄像头视频文件失败：{}", camera.getStorageLocation(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 构建扩展字段映射
+     */
+    private Map<String, Object> buildExtMap(File file, String contentType) {
+        return Map.of(
+            "fileSize", file.length(),
+            "contentType", contentType,
+            "originalPath", file.getAbsolutePath(),
+            "uploadTime", new Date()
+        );
+    }
+
+    /**
+     * 保存到OSS记录表
+     */
+    private Long saveToSysOss(CameraManagement camera, OssClient ossClient,
+                              File file, UploadResult uploadResult, String contentType) {
+        try {
+            Long ossId = IdWorker.getId();
+            Map<String, Object> extMap = buildExtMap(file, contentType);
+
+            String sql = buildInsertSql();
+            Object[] params = buildInsertParams(ossId, file, uploadResult, extMap, ossClient);
+
+            int rows = jdbcTemplate.update(sql, params);
+            return rows > 0 ? ossId : null;
+
+        } catch (Exception e) {
+            log.error("保存OSS记录失败：{}", file.getName(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 构建插入参数
+     */
+    private Object[] buildInsertParams(Long ossId, File file, UploadResult uploadResult,
+                                       Map<String, Object> extMap, OssClient ossClient) {
+        String fileName = extractUploadedFileName(uploadResult);
+        Date now = new Date();
+
+        return new Object[]{
+            ossId,
+            "000000",
+            fileName,
+            file.getName(),
+            extractFileSuffixWithoutDot(file),
+            uploadResult.getUrl(),
+            JsonUtils.toJsonString(extMap),
+            getCurrentDeptId(),
+            now,
+            getCurrentUserId(),
+            now,
+            getCurrentUserId(),
+            ossClient.getConfigKey()
+        };
+    }
+
+    /**
+     * 构建插入SQL
+     */
+    private String buildInsertSql() {
+        return "INSERT INTO sys_oss (oss_id, tenant_id, file_name, original_name, " +
+            "file_suffix, url, ext1, create_dept, create_time, create_by, " +
+            "update_time, update_by, service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    }
+
+    /**
+     * 提取上传后的文件名
+     */
+    private String extractUploadedFileName(UploadResult uploadResult) {
+        String fileName = uploadResult.getFilename();
+        return fileName.contains("/") ?
+            fileName.substring(fileName.lastIndexOf("/") + 1) : fileName;
+    }
+
+    /**
+     * 提取文件后缀（带点号）
+     */
+    private String extractFileSuffix(File file) {
+        String name = file.getName();
+        int dotIndex = name.lastIndexOf('.');
+        return dotIndex > 0 ? name.substring(dotIndex) : "";
+    }
+
+    /**
+     * 提取文件后缀（不带点号）
+     */
+    private String extractFileSuffixWithoutDot(File file) {
+        String name = file.getName();
+        int dotIndex = name.lastIndexOf('.');
+        if (dotIndex <= 0) return "";
+
+        String suffix = name.substring(dotIndex + 1);
+        return suffix.length() > 10 ? suffix.substring(0, 10) : suffix;
+    }
+
+    /**
+     * 更新摄像头记录
+     */
+    private void updateCameraRecord(CameraManagement camera, UploadResult uploadResult, Long ossId) {
+        camera.setMinioUrl(uploadResult.getUrl());
+        camera.setOssId(ossId);
+        baseMapper.updateById(camera);
+    }
+
+    /**
+     * 探测文件Content-Type
+     */
+    private String detectContentType(File file) {
+        String fileName = file.getName().toLowerCase();
+
+        Map<String, String> videoTypes = Map.ofEntries(
+            entry(".mp4", "video/mp4"),
+            entry(".avi", "video/x-msvideo"),
+            entry(".mov", "video/quicktime"),
+            entry(".mkv", "video/x-matroska"),
+            entry(".wmv", "video/x-ms-wmv"),
+            entry(".flv", "video/x-flv"),
+            entry(".mpeg", "video/mpeg"),
+            entry(".mpg", "video/mpeg"),
+            entry(".webm", "video/webm"),
+            entry(".3gp", "video/3gpp")
+        );
+
+        return videoTypes.entrySet().stream()
+            .filter(entry -> fileName.endsWith(entry.getKey()))
+            .findFirst()
+            .map(Map.Entry::getValue)
+            .orElseGet(() -> probeFileContentType(file));
+    }
+
+    /**
+     * 探测文件实际类型
+     */
+    private String probeFileContentType(File file) {
+        try {
+            String contentType = Files.probeContentType(file.toPath());
+            return (contentType != null && contentType.startsWith("video/")) ?
+                contentType : "video/*";
+        } catch (IOException e) {
+            log.warn("文件类型探测失败：{}", file.getName(), e);
+            return "video/*";
+        }
+    }
+
+    /**
+     * 获取当前用户ID
+     */
+    private Long getCurrentUserId() {
+        try {
+            // 根据实际情况实现
+            return 1L;
+        } catch (Exception e) {
+            log.error("获取当前用户ID失败", e);
+            return 1L;
+        }
+    }
+
+    /**
+     * 获取当前部门ID
+     */
+    private Long getCurrentDeptId() {
+        try {
+            // 根据实际情况实现
+            return 100L;
+        } catch (Exception e) {
+            log.error("获取当前部门ID失败", e);
+            return 100L;
+        }
     }
 
     /**
@@ -575,6 +848,7 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
      * @throws RuntimeException 当文件验证失败或分析过程中发生错误时抛出
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> analyzeVideo(MultipartFile file) {
         // 1. 参数校验 - 验证视频文件的有效性
         validateVideoFile(file);

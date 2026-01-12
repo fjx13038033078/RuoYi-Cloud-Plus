@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.resource.domain.bo.SysOssBo;
+import org.dromara.resource.domain.vo.SysOssUploadVo;
 import org.dromara.resource.domain.vo.SysOssVo;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -92,4 +93,12 @@ public interface ISysOssService {
      * @return 结果
      */
     Boolean deleteWithValidByIds(Collection<Long> ids, Boolean isValid);
+
+    /**
+     * 批量上传文件到对象存储服务，并保存文件信息到数据库
+     *
+     * @param files 要上传的文件数组
+     * @return 上传成功后的 SysOssUploadVo 对象列表，包含文件信息
+     */
+    List<SysOssUploadVo> batchUpload(MultipartFile[] files);
 }

@@ -1,13 +1,10 @@
 package org.dromara.camera.service;
 
 import org.dromara.camera.domain.CameraManagement;
-import org.dromara.camera.domain.dto.VideoAnalysisResultDTO;
+import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
-import org.dromara.common.core.domain.R;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
-import org.dromara.camera.domain.bo.CameraManagementBo;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Collection;
@@ -89,6 +86,7 @@ public interface ICameraManagementService {
 
     /**
      * 视频分析
+     *
      * @param file 视频文件
      * @return 分析结果
      */

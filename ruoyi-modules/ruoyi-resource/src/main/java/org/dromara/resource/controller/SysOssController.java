@@ -3,14 +3,16 @@ package org.dromara.resource.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.hutool.core.util.ObjectUtil;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.constraints.NotEmpty;
 import lombok.RequiredArgsConstructor;
 import org.dromara.common.core.domain.R;
 import org.dromara.common.core.validate.QueryGroup;
-import org.dromara.common.web.core.BaseController;
 import org.dromara.common.log.annotation.Log;
 import org.dromara.common.log.enums.BusinessType;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
+import org.dromara.common.web.core.BaseController;
 import org.dromara.resource.domain.bo.SysOssBo;
 import org.dromara.resource.domain.vo.SysOssUploadVo;
 import org.dromara.resource.domain.vo.SysOssVo;
@@ -20,8 +22,6 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import jakarta.servlet.http.HttpServletResponse;
-import jakarta.validation.constraints.NotEmpty;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
@@ -78,6 +78,28 @@ public class SysOssController extends BaseController {
         uploadVo.setFileName(oss.getOriginalName());
         uploadVo.setOssId(oss.getOssId().toString());
         return R.ok(uploadVo);
+    }
+
+    @PostMapping(value = "/batchUpload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public R<List<SysOssUploadVo>> batchUpload(@RequestPart("files") MultipartFile[] files) {
+        if (ObjectUtil.isNull(files) || files.length == 0) {
+            return R.fail("上传文件不能为空");
+        }
+
+        // 校验文件类型（视频文件）
+        for (MultipartFile file : files) {
+            if (file.isEmpty()) {
+                return R.fail("存在空文件");
+            }
+            // 校验是否为视频文件（可根据需要调整视频类型）
+            String contentType = file.getContentType();
+            if (contentType == null || !contentType.startsWith("video/")) {
+                return R.fail("文件 " + file.getOriginalFilename() + " 不是视频文件");
+            }
+        }
+
+        List<SysOssUploadVo> uploadVos = iSysOssService.batchUpload(files);
+        return R.ok(uploadVos);
     }
 
     /**

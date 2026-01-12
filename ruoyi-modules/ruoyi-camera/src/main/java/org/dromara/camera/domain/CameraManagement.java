@@ -3,8 +3,10 @@ package org.dromara.camera.domain;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import org.dromara.common.tenant.core.TenantEntity;
 
 import java.io.Serial;
@@ -110,4 +112,39 @@ public class CameraManagement extends TenantEntity {
      */
     @TableLogic
     private Long delFlag;
+
+    // ============= 新增字段：MinIO存储相关信息 =============
+    /**
+     * OSS文件ID
+     */
+    private Long ossId;
+
+    /**
+     * MinIO存储的URL
+     */
+    private String minioUrl;
+
+    // ====================================================
+
+
+    /**
+     * OSS记录内部类
+     */
+    @Builder
+    @Getter
+    private static class OssRecord {
+        private Long ossId;
+        private String tenantId;
+        private String fileName;
+        private String originalName;
+        private String fileSuffix;
+        private String url;
+        private String ext1;
+        private Long createDept;
+        private Date createTime;
+        private Long createBy;
+        private Date updateTime;
+        private Long updateBy;
+        private String service;
+    }
 }
