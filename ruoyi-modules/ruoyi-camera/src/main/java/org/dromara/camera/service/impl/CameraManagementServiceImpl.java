@@ -1,6 +1,7 @@
 package org.dromara.camera.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -340,27 +341,59 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<CameraManagement> scanInsertFromFolder(String folderPath) {
-        // 参数校验：确保文件夹路径不为空
         Validate.notBlank(folderPath, "文件夹路径不能为空");
-
         log.info("开始扫描文件夹: {}", folderPath);
 
-        // 使用Optional进行链式操作，避免空指针异常
-        return Optional.of(folderPath)
-            // 步骤1：扫描文件夹获取所有视频文件
-            .map(this::scanVideoFiles)
-            // 如果扫描结果为空，返回空列表
-            .orElseGet(Collections::emptyList)
-            .stream()
-            // 步骤2：获取每个文件的绝对路径
-            .map(File::getAbsolutePath)
-            // 步骤3：去重，避免重复处理相同文件
-            .distinct()
-            // 步骤4：收集所有路径并处理保存
-            .collect(Collectors.collectingAndThen(
-                Collectors.toList(),
-                this::processAndSaveVideos
-            ));
+        try {
+            // 步骤1：扫描视频文件
+            List<String> allVideoPaths = scanVideoFiles(folderPath);
+
+            if (allVideoPaths.isEmpty()) {
+                log.info("未找到视频文件");
+                return Collections.emptyList();
+            }
+
+            // 步骤2：路径规范化（统一格式）
+            List<String> normalizedPaths = allVideoPaths.stream()
+                .map(this::normalizePath)
+                .collect(Collectors.toList());
+
+            // 步骤3：从数据库获取已存在的路径
+            Set<String> existingPaths = getExistingStorageLocations();
+
+            // 步骤4：找出真正的新文件（去重）
+            List<String> newFilePaths = normalizedPaths.stream()
+                .filter(path -> !existingPaths.contains(path))
+                .distinct()  // 再次去重，确保无重复
+                .collect(Collectors.toList());
+
+            if (newFilePaths.isEmpty()) {
+                log.info("所有视频文件已在数据库中存在");
+                return Collections.emptyList();
+            }
+
+            log.info("发现 {} 个新视频文件", newFilePaths.size());
+
+            // 步骤5：构建实体并批量保存
+            List<CameraManagement> entities = newFilePaths.stream()
+                .map(this::buildCameraManagementEntity)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+            if (!entities.isEmpty()) {
+                saveBatch(entities);
+                log.info("成功保存 {} 个实体到数据库", entities.size());
+
+                // 步骤6：上传到MinIO
+                uploadVideosToMinIO(entities);
+            }
+
+            return entities;
+
+        } catch (Exception e) {
+            log.error("扫描和处理文件夹失败: {}", folderPath, e);
+            throw new RuntimeException("处理失败: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -372,83 +405,21 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
      * @return 视频文件列表，按扫描顺序排列
      * @throws RuntimeException 当文件夹访问失败时抛出
      */
-    private List<File> scanVideoFiles(String folderPath) {
-        // 视频文件扩展名的正则表达式模式
-        // 匹配以指定扩展名结尾的文件，不区分大小写
+    private List<String> scanVideoFiles(String folderPath) {
         final Pattern VIDEO_PATTERN = Pattern.compile("\\.(mp4|avi|mov|wmv|flv|mkv|mpeg|mpg|webm|3gp)$",
             Pattern.CASE_INSENSITIVE);
 
-        // 使用try-with-resources确保流资源被正确关闭
         try (Stream<Path> pathStream = Files.walk(Paths.get(folderPath))) {
             return pathStream
-                // 过滤：只保留常规文件（排除目录、符号链接等）
                 .filter(Files::isRegularFile)
-                // 过滤：只保留视频文件（通过扩展名匹配）
-                .filter(path -> VIDEO_PATTERN.matcher(path.toString()).find())
-                // 转换：Path对象转换为File对象
-                .map(Path::toFile)
-                // 收集：转换为List集合
+                .map(Path::toString)
+                .filter(path -> VIDEO_PATTERN.matcher(path).find())
+                .distinct()  // 扫描阶段就去重
                 .collect(Collectors.toList());
         } catch (IOException e) {
-            // 记录详细错误日志，便于问题排查
             log.error("扫描文件夹失败，路径: {}", folderPath, e);
             throw new RuntimeException("扫描文件夹失败: " + e.getMessage(), e);
         }
-    }
-
-    /**
-     * 处理视频文件路径列表，过滤已存在记录，构建实体并批量保存
-     * 此方法会检查数据库中是否已存在相同路径的记录，避免重复导入
-     *
-     * @param videoPaths 视频文件的完整路径列表
-     * @return 成功保存到数据库的实体列表
-     */
-    private List<CameraManagement> processAndSaveVideos(List<String> videoPaths) {
-        // 边界检查：如果路径列表为空，直接返回空列表
-        if (videoPaths.isEmpty()) {
-            log.info("没有找到新的视频文件");
-            return Collections.emptyList();
-        }
-
-        // 性能优化：一次性获取数据库中所有已存在的路径
-        // 使用Set集合提供O(1)时间复杂度的查找
-        Set<String> existingPaths = getExistingStorageLocations();
-
-        // 使用流处理过滤和转换
-        List<CameraManagement> resultList = videoPaths.stream()
-            // 过滤1：排除空路径
-            .filter(StringUtils::isNotBlank)
-            // 过滤2：排除数据库中已存在的路径
-            .filter(path -> !existingPaths.contains(normalizePath(path)))
-            // 转换：将文件路径转换为实体对象
-            .map(this::buildCameraManagementEntity)
-            // 过滤3：排除转换失败的实体（如文件不存在）
-            .filter(Objects::nonNull)
-            // 收集：转换为List集合
-            .collect(Collectors.toList());
-
-        // ==================== 新增：上传文件到MinIO ====================
-        // 只有在新文件列表不为空时执行上传
-        if (!resultList.isEmpty()) {
-            uploadVideosToMinIO(resultList);
-        }
-        // ==================== 新增结束 ====================
-
-        // 使用Optional处理结果，提供更清晰的逻辑分支
-        return Optional.of(resultList)
-            // 如果结果列表不为空，执行保存操作
-            .filter(list -> !list.isEmpty())
-            .map(list -> {
-                // 批量保存到数据库
-                saveBatch(list);
-                log.info("成功导入 {} 个视频文件到数据库", list.size());
-                return list;
-            })
-            // 如果结果列表为空，记录提示信息并返回空列表
-            .orElseGet(() -> {
-                log.info("所有视频文件已在数据库中存在，无需重复导入");
-                return Collections.emptyList();
-            });
     }
 
     /**
@@ -707,18 +678,15 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
      * @return 数据库中所有存储路径的集合（已规范化处理）
      */
     private Set<String> getExistingStorageLocations() {
-        return Optional.ofNullable(baseMapper.selectList(null))
-            // 如果查询结果为null，使用空列表替代
-            .orElseGet(Collections::emptyList)
-            .stream()
-            // 提取每个实体的存储路径
+        List<CameraManagement> existingList = baseMapper.selectList(
+            new QueryWrapper<CameraManagement>().select("storage_location")
+        );
+
+        return existingList.stream()
             .map(CameraManagement::getStorageLocation)
-            // 过滤：排除空路径
             .filter(StringUtils::isNotBlank)
-            // 规范化：统一路径格式
-            .map(this::normalizePath)
-            // 收集：使用LinkedHashSet保持顺序且去重
-            .collect(Collectors.toCollection(LinkedHashSet::new));
+            .map(this::normalizePath)  // 统一规范化格式
+            .collect(Collectors.toSet());
     }
 
     /**
@@ -808,36 +776,6 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
             // 如果原始路径为null，返回null（保持一致性）
             .orElse(path);
     }
-
-//     ==================== 可选的扩展方法 ====================
-
-    /**
-     * 从文件路径中提取文件名（不包含路径）
-     *
-     * @param filePath 完整文件路径
-     * @return 文件名，如"test.mp4"
-     */
-    private String extractFileName(String filePath) {
-        return Optional.ofNullable(filePath)
-            .map(File::new)
-            .map(File::getName)
-            .orElse("");
-    }
-
-    /**
-     * 获取文件大小（字节）
-     *
-     * @param filePath 文件路径
-     * @return 文件大小，如果文件不存在返回0
-     */
-    private Long getFileSize(String filePath) {
-        return Optional.of(filePath)
-            .map(File::new)
-            .filter(File::exists)
-            .map(File::length)
-            .orElse(0L);
-    }
-
 
     /**
      * 分析视频文件

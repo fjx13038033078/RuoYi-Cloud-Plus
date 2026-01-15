@@ -123,28 +123,4 @@ public class CameraManagement extends TenantEntity {
      * MinIO存储的URL
      */
     private String minioUrl;
-
-    // ====================================================
-
-
-    /**
-     * OSS记录内部类
-     */
-    @Builder
-    @Getter
-    private static class OssRecord {
-        private Long ossId;
-        private String tenantId;
-        private String fileName;
-        private String originalName;
-        private String fileSuffix;
-        private String url;
-        private String ext1;
-        private Long createDept;
-        private Date createTime;
-        private Long createBy;
-        private Date updateTime;
-        private Long updateBy;
-        private String service;
-    }
 }
