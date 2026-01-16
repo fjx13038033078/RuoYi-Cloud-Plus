@@ -123,6 +123,18 @@
             <groupId>org.dromara</groupId>
             <artifactId>ruoyi-common-oss</artifactId>
         </dependency>
+
+        <!-- pom.xml 中添加 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-library</artifactId>
+            <version>2.13.9</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <build>

@@ -10,7 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
-import org.apache.dubbo.config.annotation.DubboReference;
+import org.dromara.camera.config.RabbitMQService;
 import org.dromara.camera.domain.CameraManagement;
 import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
@@ -24,7 +24,6 @@ import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.common.oss.core.OssClient;
 import org.dromara.common.oss.entity.UploadResult;
 import org.dromara.common.oss.factory.OssFactory;
-import org.dromara.resource.api.RemoteFileService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -68,8 +67,8 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    @DubboReference
-    private RemoteFileService remoteFileService; // 注入OSS服务
+    @Autowired
+    private RabbitMQService rabbitMQService;
 
     private final ExternalAnalysisClient externalAnalysisClient;
 
@@ -489,11 +488,34 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
             updateCameraRecord(camera, uploadResult, ossId);
             log.info("文件上传成功：{}，OSS ID：{}", file.getName(), ossId);
 
+            // 发送消息到RabbitMQ
+            sendUploadSuccessMessage(camera, uploadResult, ossId, file);
+
             return camera;
 
         } catch (Exception e) {
             log.error("上传摄像头视频文件失败：{}", camera.getStorageLocation(), e);
             return null;
+        }
+    }
+
+    /**
+     * 发送上传成功消息到RabbitMQ
+     */
+    private void sendUploadSuccessMessage(CameraManagement camera, UploadResult uploadResult,
+                                          Long ossId, File file) {
+        try {
+            rabbitMQService.sendMinioUrlMessage(
+                uploadResult.getUrl(),
+                ossId,
+                file.getAbsolutePath(),
+                file.getName(),
+                camera.getUserName()
+            );
+            log.info("已发送MinIO URL到RabbitMQ: {}", uploadResult.getUrl());
+        } catch (Exception e) {
+            log.error("发送RabbitMQ消息失败，但文件上传已成功: {}", uploadResult.getUrl(), e);
+            // 这里可以选择将消息存储到本地，后续重试
         }
     }
 
