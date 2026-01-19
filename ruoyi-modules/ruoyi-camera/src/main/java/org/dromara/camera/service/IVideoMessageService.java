@@ -2,8 +2,6 @@ package org.dromara.camera.service;
 
 import org.dromara.camera.domain.VideoUploadMessage;
 
-import java.util.Map;
-
 /**
  * 视频消息服务接口
  * 用于发送视频上传消息到消息队列
@@ -13,29 +11,23 @@ import java.util.Map;
 public interface IVideoMessageService {
 
     /**
-     * 发送视频上传消息
+     * 发送视频上传消息（包含预签名URL）
      *
      * @param message 视频上传消息
      */
     void sendVideoUploadMessage(VideoUploadMessage message);
 
     /**
-     * 发送MinIO URL消息
+     * 构建并发送视频检测消息
      *
-     * @param minioUrl    MinIO地址
-     * @param ossId       数据库主键ID
-     * @param metadataMap 元数据
+     * @param videoId       数据库主键ID
+     * @param presignedUrl  预签名URL（24小时有效）
+     * @param bucketName    存储桶名称
+     * @param objectName    对象名称
+     * @param originalUrl   原始URL
+     * @param metadata      元数据
      */
-    void sendMinioUrlMessage(String minioUrl, Long ossId, Map<String, Object> metadataMap);
-
-    /**
-     * 发送MinIO URL消息（兼容旧调用）
-     *
-     * @param minioUrl     MinIO地址
-     * @param ossId        数据库主键ID
-     * @param originalPath 原始路径
-     * @param fileName     文件名
-     * @param userName     用户名
-     */
-    void sendMinioUrlMessage(String minioUrl, Long ossId, String originalPath, String fileName, String userName);
+    void sendVideoDetectionMessage(Long videoId, String presignedUrl, String bucketName,
+                                   String objectName, String originalUrl,
+                                   VideoUploadMessage.Metadata metadata);
 }

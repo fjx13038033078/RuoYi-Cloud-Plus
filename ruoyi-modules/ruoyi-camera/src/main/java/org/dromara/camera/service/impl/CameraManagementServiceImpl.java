@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
 import org.dromara.camera.client.VideoAnalysisClient;
+import org.dromara.camera.domain.VideoUploadMessage;
 import org.dromara.camera.service.IVideoMessageService;
 import org.dromara.camera.domain.CameraManagement;
 import org.dromara.camera.domain.bo.CameraManagementBo;
@@ -28,6 +29,10 @@ import org.dromara.common.oss.factory.OssFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import java.time.Duration;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
@@ -498,8 +503,8 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
                 log.info("文件处理成功：{}，OSS ID：{}，文件大小：{} MB",
                     sourceFile.getName(), ossId, String.format("%.2f", sourceFile.length() / (1024.0 * 1024.0)));
 
-                // 发送消息到 RabbitMQ
-                sendUploadSuccessMessage(entity, uploadResult, ossId, sourceFile);
+                // 发送消息到 RabbitMQ（事务提交后执行）
+                sendUploadSuccessMessage(entity, uploadResult, ossId, sourceFile, currentClient);
 
                 return entity;
 
@@ -599,8 +604,8 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
                 log.info("文件上传成功：{}，OSS ID：{}，文件大小：{} MB",
                     sourceFile.getName(), ossId, String.format("%.2f", sourceFile.length() / (1024.0 * 1024.0)));
 
-                // 发送消息到RabbitMQ
-                sendUploadSuccessMessage(camera, uploadResult, ossId, sourceFile);
+                // 发送消息到RabbitMQ（事务提交后执行）
+                sendUploadSuccessMessage(camera, uploadResult, ossId, sourceFile, currentClient);
 
                 return camera;
 
@@ -627,23 +632,100 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
     }
 
     /**
-     * 发送上传成功消息到RabbitMQ
+     * 预签名URL有效期（24小时）
+     */
+    private static final Duration PRESIGNED_URL_EXPIRATION = Duration.ofHours(24);
+
+    /**
+     * 发送上传成功消息到RabbitMQ（在事务提交后执行）
+     * 生成24小时有效的预签名URL，供下游Python消费者下载视频
      */
     private void sendUploadSuccessMessage(CameraManagement camera, UploadResult uploadResult,
-                                          Long ossId, File file) {
-        try {
-            videoMessageService.sendMinioUrlMessage(
-                uploadResult.getUrl(),
-                ossId,
-                file.getAbsolutePath(),
-                file.getName(),
-                camera.getUserName()
-            );
-            log.info("已发送MinIO URL到RabbitMQ: {}", uploadResult.getUrl());
-        } catch (Exception e) {
-            log.error("发送RabbitMQ消息失败，但文件上传已成功: {}", uploadResult.getUrl(), e);
-            // 这里可以选择将消息存储到本地，后续重试
+                                          Long ossId, File file, OssClient ossClient) {
+        // 解析URL获取objectName
+        String originalUrl = uploadResult.getUrl();
+        String objectName = ossClient.removeBaseUrl(originalUrl);
+
+        // 构建元数据
+        VideoUploadMessage.Metadata metadata = VideoUploadMessage.Metadata.builder()
+            .videoCode(extractVideoCode(file.getName()))
+            .userName(camera.getUserName())
+            .recordTime(camera.getShootTime() != null
+                ? camera.getShootTime().toString()
+                : null)
+            .fileName(file.getName())
+            .fileSize(file.length())
+            .contentType(detectContentType(file))
+            .originalPath(file.getAbsolutePath())
+            .build();
+
+        // 获取存储桶名称
+        String bucketName = extractBucketName(originalUrl);
+
+        // 在事务提交后发送消息，确保数据库记录已落库
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    doSendMessage(camera.getVideoId(), ossClient, objectName, bucketName, originalUrl, metadata);
+                }
+            });
+            log.debug("已注册事务提交后回调，将在事务提交后发送MQ消息");
+        } else {
+            // 非事务环境，直接发送
+            doSendMessage(camera.getVideoId(), ossClient, objectName, bucketName, originalUrl, metadata);
         }
+    }
+
+    /**
+     * 实际执行消息发送
+     */
+    private void doSendMessage(Long videoId, OssClient ossClient, String objectName,
+                               String bucketName, String originalUrl,
+                               VideoUploadMessage.Metadata metadata) {
+        try {
+            // 生成预签名URL（24小时有效）
+            String presignedUrl = ossClient.getPrivateUrl(objectName, PRESIGNED_URL_EXPIRATION);
+
+            videoMessageService.sendVideoDetectionMessage(
+                videoId,
+                presignedUrl,
+                bucketName,
+                objectName,
+                originalUrl,
+                metadata
+            );
+
+            log.info("已发送视频检测消息到RabbitMQ: videoId={}, presignedUrl有效期=24小时", videoId);
+        } catch (Exception e) {
+            log.error("发送RabbitMQ消息失败，但文件上传已成功: videoId={}", videoId, e);
+            // TODO: 可以将失败消息存储到本地表，后续定时重试
+        }
+    }
+
+    /**
+     * 从URL中提取存储桶名称
+     */
+    private String extractBucketName(String url) {
+        try {
+            // URL格式: http://host:port/bucket/path/file
+            String path = url.replaceFirst("https?://[^/]+/", "");
+            int slashIndex = path.indexOf("/");
+            return slashIndex > 0 ? path.substring(0, slashIndex) : path;
+        } catch (Exception e) {
+            log.warn("提取存储桶名称失败: {}", url, e);
+            return "unknown";
+        }
+    }
+
+    /**
+     * 从文件名中提取视频编码
+     */
+    private String extractVideoCode(String fileName) {
+        if (fileName != null && fileName.contains("_")) {
+            return fileName.split("_")[0];
+        }
+        return fileName;
     }
 
     /**

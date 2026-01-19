@@ -9,9 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -37,12 +34,18 @@ public class VideoMessageServiceImpl implements IVideoMessageService {
     public void sendVideoUploadMessage(VideoUploadMessage message) {
         try {
             // 生成任务ID（如果未提供）
-            if (message.getVideoId() == null || message.getVideoId().isEmpty()) {
-                message.setVideoId(UUID.randomUUID().toString());
+            if (message.getTaskId() == null || message.getTaskId().isEmpty()) {
+                message.setTaskId(generateTaskId(message.getVideoId()));
             }
 
-            log.info("发送视频上传消息到RabbitMQ: taskId={}, bucket={}, object={}",
-                message.getVideoId(), message.getBucketName(), message.getObjectName());
+            // 设置创建时间
+            if (message.getCreateTime() == null) {
+                message.setCreateTime(LocalDateTime.now());
+            }
+
+            log.info("发送视频检测消息到RabbitMQ: taskId={}, videoId={}, bucket={}, object={}",
+                message.getTaskId(), message.getVideoId(),
+                message.getBucketName(), message.getObjectName());
 
             rabbitTemplate.convertAndSend(
                 videoUploadExchange,
@@ -50,117 +53,49 @@ public class VideoMessageServiceImpl implements IVideoMessageService {
                 message
             );
 
-            log.info("消息发送成功: taskId={}", message.getVideoId());
+            log.info("消息发送成功: taskId={}, presignedUrl长度={}",
+                message.getTaskId(),
+                message.getPresignedUrl() != null ? message.getPresignedUrl().length() : 0);
 
         } catch (Exception e) {
-            log.error("发送RabbitMQ消息失败: {}", message, e);
+            log.error("发送RabbitMQ消息失败: taskId={}, videoId={}",
+                message.getTaskId(), message.getVideoId(), e);
             throw new RuntimeException("消息发送失败", e);
         }
     }
 
     @Override
-    public void sendMinioUrlMessage(String minioUrl, Long ossId, Map<String, Object> metadataMap) {
-        try {
-            // 解析MinIO URL获取bucket和object
-            MinioUrlInfo minioInfo = parseMinioUrl(minioUrl);
+    public void sendVideoDetectionMessage(Long videoId, String presignedUrl, String bucketName,
+                                          String objectName, String originalUrl,
+                                          VideoUploadMessage.Metadata metadata) {
+        // 生成任务ID
+        String taskId = generateTaskId(videoId);
 
-            // 提取关键元数据
-            String videoCode = extractValue(metadataMap, "videoCode", "UNKNOWN");
-            String userId = extractValue(metadataMap, "userId", "0");
-            String recordTime = extractValue(metadataMap, "recordTime",
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")));
+        // 构建消息
+        VideoUploadMessage message = VideoUploadMessage.builder()
+            .taskId(taskId)
+            .videoId(videoId)
+            .presignedUrl(presignedUrl)
+            .bucketName(bucketName)
+            .objectName(objectName)
+            .originalUrl(originalUrl)
+            .createTime(LocalDateTime.now())
+            .metadata(metadata)
+            .build();
 
-            // 构建元数据对象
-            Map<String, Object> extFields = new HashMap<>(metadataMap);
-            extFields.put("minioUrl", minioUrl);
-            extFields.put("ossId", ossId);
-            extFields.put("sendTime", LocalDateTime.now().toString());
-
-            VideoUploadMessage.Metadata metadata = VideoUploadMessage.Metadata.builder()
-                .videoCode(videoCode)
-                .userId(userId)
-                .recordTime(recordTime)
-                .extFields(extFields)
-                .build();
-
-            // 生成任务ID
-            String taskId = ossId != null
-                ? "OSS-" + ossId
-                : "UUID-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-
-            // 构建消息
-            VideoUploadMessage message = VideoUploadMessage.builder()
-                .videoId(taskId)
-                .bucketName(minioInfo.bucketName())
-                .objectName(minioInfo.objectName())
-                .metadata(metadata)
-                .build();
-
-            sendVideoUploadMessage(message);
-
-        } catch (Exception e) {
-            log.error("发送MinIO URL消息失败: minioUrl={}, ossId={}", minioUrl, ossId, e);
-            throw new RuntimeException("构建消息失败", e);
-        }
-    }
-
-    @Override
-    public void sendMinioUrlMessage(String minioUrl, Long ossId, String originalPath,
-                                    String fileName, String userName) {
-        Map<String, Object> metadataMap = new HashMap<>();
-        metadataMap.put("originalPath", originalPath);
-        metadataMap.put("fileName", fileName);
-        metadataMap.put("userName", userName);
-
-        // 尝试从fileName提取videoCode
-        if (fileName != null && fileName.contains("_")) {
-            String[] parts = fileName.split("_");
-            if (parts.length > 0) {
-                metadataMap.put("videoCode", parts[0]);
-            }
-        }
-
-        sendMinioUrlMessage(minioUrl, ossId, metadataMap);
+        sendVideoUploadMessage(message);
     }
 
     /**
-     * 解析MinIO URL
+     * 生成任务ID
      *
-     * @param minioUrl MinIO URL
-     * @return MinIO信息
+     * @param videoId 视频ID
+     * @return 任务ID
      */
-    private MinioUrlInfo parseMinioUrl(String minioUrl) {
-        try {
-            // 示例URL: http://127.0.0.1:9000/zhifajiluyi/2026/01/16/xxx.mp4
-            String path = minioUrl.replaceFirst("https?://[^/]+/", "");
-            int slashIndex = path.indexOf("/");
-
-            if (slashIndex > 0) {
-                String bucketName = path.substring(0, slashIndex);
-                String objectName = path.substring(slashIndex + 1);
-                return new MinioUrlInfo(bucketName, objectName);
-            } else {
-                return new MinioUrlInfo("default", path);
-            }
-        } catch (Exception e) {
-            log.warn("解析MinIO URL失败: {}, 使用默认值", minioUrl, e);
-            return new MinioUrlInfo("unknown", "unknown");
+    private String generateTaskId(Long videoId) {
+        if (videoId != null) {
+            return "VID-" + videoId + "-" + System.currentTimeMillis();
         }
-    }
-
-    /**
-     * 从Map中提取值
-     */
-    private String extractValue(Map<String, Object> map, String key, String defaultValue) {
-        if (map != null && map.containsKey(key) && map.get(key) != null) {
-            return map.get(key).toString();
-        }
-        return defaultValue;
-    }
-
-    /**
-     * MinIO URL信息记录类
-     */
-    private record MinioUrlInfo(String bucketName, String objectName) {
+        return "TASK-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 }

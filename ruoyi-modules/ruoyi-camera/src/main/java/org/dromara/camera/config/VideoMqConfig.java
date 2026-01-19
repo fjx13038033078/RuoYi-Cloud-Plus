@@ -59,12 +59,12 @@ public class VideoMqConfig {
     }
 
     /**
-     * 视频上传交换机
+     * 视频检测交换机（Topic Exchange，支持通配符路由）
      */
     @Bean
-    public DirectExchange videoUploadExchange() {
+    public TopicExchange videoUploadExchange() {
         return ExchangeBuilder
-            .directExchange(videoUploadExchange)
+            .topicExchange(videoUploadExchange)
             .durable(true)
             .build();
     }
