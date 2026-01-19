@@ -1,4 +1,4 @@
-package org.dromara.camera.controller.system;
+package org.dromara.camera.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.idev.excel.EasyExcel;
@@ -35,7 +35,6 @@ import java.util.Map;
 
 /**
  * 执法视频信息管理
- * 前端访问路由地址为:/system/management
  *
  * @author LionLi
  * @date 2025-12-05
@@ -68,23 +67,9 @@ public class CameraManagementController extends BaseController {
         ExcelUtil.exportExcel(list, "执法视频信息管理", CameraManagementVo.class, response);
     }
 
-//    /**
-//     * 获取执法视频信息管理详细信息
-//     * @param file 文件
-//     * @return 执法视频信息管理
-//     */
-//    @SaCheckPermission("system:management:import")
-//    @Log(title = "执法视频信息管理", businessType = BusinessType.IMPORT)
-//    @PostMapping("/import")
-//    public R<List<CameraManagement>> importData(@RequestParam("file") MultipartFile file){
-//        try {
-//            List<CameraManagement> results = cameraManagementService.importFromExcel(file);
-//            return R.ok(results);
-//        } catch (Exception e) {
-//            return R.fail("导入失败: " + e.getMessage());
-//        }
-//    }
-
+    /**
+     * 扫描文件夹导入视频
+     */
     @SaCheckPermission("camera:management:scanInsert")
     @Log(title = "执法视频信息管理", businessType = BusinessType.IMPORT)
     @PostMapping("/scanInsert")
@@ -112,11 +97,10 @@ public class CameraManagementController extends BaseController {
         List<CameraImportExcelVo> list = new ArrayList<>();
 
         EasyExcel.write(response.getOutputStream(), CameraImportExcelVo.class)
-            .registerWriteHandler(new LongestMatchColumnWidthStyleStrategy()) // 自动列宽
+            .registerWriteHandler(new LongestMatchColumnWidthStyleStrategy())
             .sheet("模板")
             .doWrite(list);
     }
-
 
     /**
      * 获取执法视频信息管理详细信息
@@ -147,7 +131,7 @@ public class CameraManagementController extends BaseController {
     @SaCheckPermission("camera:management:edit")
     @Log(title = "执法视频信息管理", businessType = BusinessType.UPDATE)
     @RepeatSubmit()
-    @PutMapping()
+    @PostMapping("/edit")
     public R<Void> edit(@Validated(EditGroup.class) @RequestBody CameraManagementBo bo) {
         return toAjax(cameraManagementService.updateByBo(bo));
     }
@@ -159,17 +143,19 @@ public class CameraManagementController extends BaseController {
      */
     @SaCheckPermission("camera:management:remove")
     @Log(title = "执法视频信息管理", businessType = BusinessType.DELETE)
-    @DeleteMapping("/{videoIds}")
+    @PostMapping("/remove")
     public R<Void> remove(@NotEmpty(message = "主键不能为空")
-                          @PathVariable("videoIds") Long[] videoIds) {
+                          @RequestBody Long[] videoIds) {
         return toAjax(cameraManagementService.deleteWithValidByIds(List.of(videoIds), true));
     }
 
+    /**
+     * 上传视频并调用AI分析
+     */
     @SaCheckPermission("camera:management:upload")
     @PostMapping("/upload")
-    public  R<Map<String, Object>> uploadVideo(@RequestParam("file") MultipartFile file) {
+    public R<Map<String, Object>> uploadVideo(@RequestParam("file") MultipartFile file) {
         try {
-            // 直接调用外部服务
             Map<String, Object> result = cameraManagementService.analyzeVideo(file);
             return R.ok("视频分析成功", result);
         } catch (IllegalArgumentException e) {
