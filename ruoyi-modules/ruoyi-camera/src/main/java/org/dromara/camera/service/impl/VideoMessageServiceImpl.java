@@ -1,13 +1,10 @@
-package org.dromara.camera.config;
+package org.dromara.camera.service.impl;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dromara.camera.domain.VideoUploadMessage;
+import org.dromara.camera.service.IVideoMessageService;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -17,12 +14,18 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * 视频消息服务实现类
+ * 用于发送视频上传消息到RabbitMQ
+ *
+ * @author LionLi
+ */
 @Slf4j
+@RequiredArgsConstructor
 @Service
-public class RabbitMQService {
+public class VideoMessageServiceImpl implements IVideoMessageService {
 
-    @Autowired
-    private RabbitTemplate rabbitTemplate;
+    private final RabbitTemplate rabbitTemplate;
 
     @Value("${spring.rabbitmq.video-upload.exchange}")
     private String videoUploadExchange;
@@ -30,12 +33,7 @@ public class RabbitMQService {
     @Value("${spring.rabbitmq.video-upload.routing-key}")
     private String videoUploadRoutingKey;
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    /**
-     * 发送视频上传消息到RabbitMQ（新格式）
-     */
+    @Override
     public void sendVideoUploadMessage(VideoUploadMessage message) {
         try {
             // 生成任务ID（如果未提供）
@@ -60,16 +58,11 @@ public class RabbitMQService {
         }
     }
 
-    /**
-     * 发送MinIO URL消息 - 新格式
-     * @param minioUrl MinIO地址
-     * @param ossId 数据库主键ID
-     * @param metadataMap 元数据（应包含videoCode, userId, recordTime等）
-     */
+    @Override
     public void sendMinioUrlMessage(String minioUrl, Long ossId, Map<String, Object> metadataMap) {
         try {
             // 解析MinIO URL获取bucket和object
-            MinioInfo minioInfo = parseMinioUrl(minioUrl);
+            MinioUrlInfo minioInfo = parseMinioUrl(minioUrl);
 
             // 提取关键元数据
             String videoCode = extractValue(metadataMap, "videoCode", "UNKNOWN");
@@ -91,13 +84,15 @@ public class RabbitMQService {
                 .build();
 
             // 生成任务ID
-            String taskId = ossId != null ? "OSS-" + ossId : "UUID-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+            String taskId = ossId != null
+                ? "OSS-" + ossId
+                : "UUID-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
 
             // 构建消息
             VideoUploadMessage message = VideoUploadMessage.builder()
                 .videoId(taskId)
-                .bucketName(minioInfo.getBucketName())
-                .objectName(minioInfo.getObjectName())
+                .bucketName(minioInfo.bucketName())
+                .objectName(minioInfo.objectName())
                 .metadata(metadata)
                 .build();
 
@@ -109,12 +104,9 @@ public class RabbitMQService {
         }
     }
 
-    /**
-     * 发送MinIO URL消息 - 重载方法（兼容旧调用）
-     */
+    @Override
     public void sendMinioUrlMessage(String minioUrl, Long ossId, String originalPath,
                                     String fileName, String userName) {
-        // 从参数中构建metadataMap
         Map<String, Object> metadataMap = new HashMap<>();
         metadataMap.put("originalPath", originalPath);
         metadataMap.put("fileName", fileName);
@@ -132,51 +124,27 @@ public class RabbitMQService {
     }
 
     /**
-     * 从Map发送消息（兼容现有代码）
-     */
-    public void sendMinioUrlFromMap(Map<String, Object> uploadInfo) {
-        try {
-            String minioUrl = (String) uploadInfo.get("minioUrl");
-            Long ossId = null;
-            if (uploadInfo.get("ossId") != null) {
-                if (uploadInfo.get("ossId") instanceof Number) {
-                    ossId = ((Number) uploadInfo.get("ossId")).longValue();
-                } else if (uploadInfo.get("ossId") instanceof String) {
-                    ossId = Long.parseLong((String) uploadInfo.get("ossId"));
-                }
-            }
-
-            if (minioUrl != null) {
-                // 直接传递整个map作为metadata
-                sendMinioUrlMessage(minioUrl, ossId, uploadInfo);
-            } else {
-                log.warn("minioUrl为空，跳过消息发送");
-            }
-        } catch (Exception e) {
-            log.error("从Map发送消息失败", e);
-        }
-    }
-
-    /**
      * 解析MinIO URL
+     *
+     * @param minioUrl MinIO URL
+     * @return MinIO信息
      */
-    private MinioInfo parseMinioUrl(String minioUrl) {
+    private MinioUrlInfo parseMinioUrl(String minioUrl) {
         try {
-            // 示例URL: http://127.0.0.1:9000/zhifajiluyi/2026/01/16/e3626345c5294724ad9666b98ae231f7.mp4
-            String path = minioUrl.replaceFirst("http://[^/]+/", "");
+            // 示例URL: http://127.0.0.1:9000/zhifajiluyi/2026/01/16/xxx.mp4
+            String path = minioUrl.replaceFirst("https?://[^/]+/", "");
             int slashIndex = path.indexOf("/");
 
             if (slashIndex > 0) {
                 String bucketName = path.substring(0, slashIndex);
                 String objectName = path.substring(slashIndex + 1);
-                return new MinioInfo(bucketName, objectName);
+                return new MinioUrlInfo(bucketName, objectName);
             } else {
-                // 如果没有斜杠，整个路径作为objectName
-                return new MinioInfo("default", path);
+                return new MinioUrlInfo("default", path);
             }
         } catch (Exception e) {
             log.warn("解析MinIO URL失败: {}, 使用默认值", minioUrl, e);
-            return new MinioInfo("unknown", "unknown");
+            return new MinioUrlInfo("unknown", "unknown");
         }
     }
 
@@ -191,13 +159,8 @@ public class RabbitMQService {
     }
 
     /**
-     * 内部类：MinIO信息
+     * MinIO URL信息记录类
      */
-    @Data
-    @AllArgsConstructor
-    @NoArgsConstructor
-    private static class MinioInfo {
-        private String bucketName;
-        private String objectName;
+    private record MinioUrlInfo(String bucketName, String objectName) {
     }
 }

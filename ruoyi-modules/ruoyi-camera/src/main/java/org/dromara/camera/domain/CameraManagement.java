@@ -3,10 +3,8 @@ package org.dromara.camera.domain;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
-import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import lombok.Getter;
 import org.dromara.common.tenant.core.TenantEntity;
 
 import java.io.Serial;

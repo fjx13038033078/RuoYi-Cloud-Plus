@@ -10,7 +10,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
-import org.dromara.camera.config.RabbitMQService;
+import org.dromara.camera.client.VideoAnalysisClient;
+import org.dromara.camera.service.IVideoMessageService;
 import org.dromara.camera.domain.CameraManagement;
 import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
@@ -24,7 +25,6 @@ import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.common.oss.core.OssClient;
 import org.dromara.common.oss.entity.UploadResult;
 import org.dromara.common.oss.factory.OssFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,7 +44,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static com.baomidou.mybatisplus.extension.toolkit.Db.saveBatch;
 import static java.util.Map.entry;
 import static org.springframework.web.util.UriUtils.extractFileExtension;
 
@@ -64,13 +63,11 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
 
     private final CameraManagementMapper baseMapper;
 
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private final JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private RabbitMQService rabbitMQService;
+    private final IVideoMessageService videoMessageService;
 
-    private final ExternalAnalysisClient externalAnalysisClient;
+    private final VideoAnalysisClient videoAnalysisClient;
 
     private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList("mp4", "avi", "mov", "wmv", "flv", "mkv");
 
@@ -330,7 +327,7 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
 
     /**
      * 扫描指定文件夹下的视频文件并导入到数据库
-     * 方法具有事务性，异常时回滚
+     * 重要：采用"先上传后保存"策略，确保只有上传成功的文件才会写入数据库
      *
      * @param folderPath 要扫描的文件夹路径（Windows路径，如：D:\执法记录仪）
      * @return 成功导入的CameraManagement实体列表
@@ -338,7 +335,6 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
      * @throws RuntimeException         当扫描或导入过程发生错误时抛出
      */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public List<CameraManagement> scanInsertFromFolder(String folderPath) {
         Validate.notBlank(folderPath, "文件夹路径不能为空");
         log.info("开始扫描文件夹: {}", folderPath);
@@ -373,21 +369,21 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
 
             log.info("发现 {} 个新视频文件", newFilePaths.size());
 
-            // 步骤5：构建实体并批量保存
-            List<CameraManagement> entities = newFilePaths.stream()
-                .map(this::buildCameraManagementEntity)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-
-            if (!entities.isEmpty()) {
-                saveBatch(entities);
-                log.info("成功保存 {} 个实体到数据库", entities.size());
-
-                // 步骤6：上传到MinIO
-                uploadVideosToMinIO(entities);
+            // 步骤5：逐个处理文件（先上传后保存，确保不会重复写入数据库）
+            List<CameraManagement> successEntities = new ArrayList<>();
+            for (String filePath : newFilePaths) {
+                try {
+                    CameraManagement result = processAndUploadSingleVideo(filePath);
+                    if (result != null) {
+                        successEntities.add(result);
+                    }
+                } catch (Exception e) {
+                    log.error("处理单个视频文件失败：{}，错误：{}", filePath, e.getMessage());
+                }
             }
 
-            return entities;
+            log.info("视频处理完成，成功：{}，总数：{}", successEntities.size(), newFilePaths.size());
+            return successEntities;
 
         } catch (Exception e) {
             log.error("扫描和处理文件夹失败: {}", folderPath, e);
@@ -422,32 +418,123 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
     }
 
     /**
-     * 新增方法：批量上传视频文件到MinIO
-     * 这个方法将扫描到的视频文件上传到MinIO对象存储，并更新数据库中的URL字段
+     * 处理并上传单个视频文件
+     * 采用"先上传后保存"策略：
+     * 1. 检查数据库是否已存在（防止并发重复）
+     * 2. 上传到 MinIO
+     * 3. 上传成功后才保存到数据库
      *
-     * @param cameraList 需要上传的视频文件列表
+     * @param filePath 视频文件路径
+     * @return 成功则返回实体，失败返回 null
      */
-    private void uploadVideosToMinIO(List<CameraManagement> cameraList) {
-        try {
-            log.info("开始批量上传视频文件到MinIO，文件数量：{}", cameraList.size());
-
-            OssClient ossClient = OssFactory.instance();
-            if (ossClient == null) {
-                log.error("OssClient未初始化，上传任务终止");
-                return;
-            }
-
-            long successCount = cameraList.stream()
-                .filter(this::isValidVideoFile)
-                .map(camera -> uploadCameraVideo(camera, ossClient))
-                .filter(Objects::nonNull)
-                .count();
-
-            log.info("视频上传完成，成功数量：{}", successCount);
-
-        } catch (Exception e) {
-            log.error("批量上传视频文件到MinIO失败", e);
+    @Transactional(rollbackFor = Exception.class)
+    public CameraManagement processAndUploadSingleVideo(String filePath) {
+        // 步骤1：再次检查数据库是否已存在（防止并发导致重复）
+        if (isPathExistsInDatabase(filePath)) {
+            log.info("文件已存在于数据库中，跳过：{}", filePath);
+            return null;
         }
+
+        // 步骤2：验证文件是否存在
+        File sourceFile = new File(filePath);
+        if (!sourceFile.exists() || !sourceFile.isFile()) {
+            log.warn("视频文件无效或不存在：{}", filePath);
+            return null;
+        }
+
+        // 步骤3：构建实体（但不保存）
+        CameraManagement entity = buildCameraManagementEntity(filePath);
+        if (entity == null) {
+            return null;
+        }
+
+        // 步骤4：上传到 MinIO
+        String contentType = detectContentType(sourceFile);
+        String suffix = extractFileSuffix(sourceFile);
+        int maxRetries = 3;
+
+        for (int retry = 0; retry < maxRetries; retry++) {
+            Path tempFile = null;
+            try {
+                if (retry > 0) {
+                    log.info("第 {} 次重试上传文件：{}", retry, sourceFile.getName());
+                    Thread.sleep(2000);
+                }
+
+                OssClient currentClient = OssFactory.instance();
+                if (currentClient == null) {
+                    log.error("OssClient获取失败，第 {} 次尝试", retry + 1);
+                    continue;
+                }
+
+                // 复制到临时文件
+                tempFile = Files.createTempFile("camera_upload_", suffix);
+                Files.copy(sourceFile.toPath(), tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+                // 上传临时文件
+                UploadResult uploadResult = currentClient.uploadSuffix(tempFile.toFile(), suffix);
+                if (uploadResult == null) {
+                    log.error("文件上传返回结果为空：{}", sourceFile.getName());
+                    continue;
+                }
+
+                // 步骤5：上传成功后，再次检查并保存到数据库（使用数据库唯一约束防止重复）
+                if (isPathExistsInDatabase(filePath)) {
+                    log.info("文件在上传过程中已被其他线程处理，跳过保存：{}", filePath);
+                    return null;
+                }
+
+                // 保存 camera_management 记录
+                entity.setMinioUrl(uploadResult.getUrl());
+                baseMapper.insert(entity);
+
+                // 保存 sys_oss 记录
+                Long ossId = saveToSysOss(entity, currentClient, sourceFile, uploadResult, contentType);
+                if (ossId != null) {
+                    entity.setOssId(ossId);
+                    baseMapper.updateById(entity);
+                }
+
+                log.info("文件处理成功：{}，OSS ID：{}，文件大小：{} MB",
+                    sourceFile.getName(), ossId, String.format("%.2f", sourceFile.length() / (1024.0 * 1024.0)));
+
+                // 发送消息到 RabbitMQ
+                sendUploadSuccessMessage(entity, uploadResult, ossId, sourceFile);
+
+                return entity;
+
+            } catch (Exception e) {
+                log.error("处理视频文件失败（第 {} 次尝试）：{}，错误：{}",
+                    retry + 1, filePath, e.getMessage());
+
+                if (retry == maxRetries - 1) {
+                    log.error("处理文件最终失败，已达到最大重试次数：{}", filePath, e);
+                }
+
+                // 清理临时文件
+                if (tempFile != null) {
+                    try {
+                        Files.deleteIfExists(tempFile);
+                    } catch (IOException ignored) {
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * 检查路径是否已存在于数据库中
+     *
+     * @param filePath 文件路径
+     * @return 如果存在返回 true
+     */
+    private boolean isPathExistsInDatabase(String filePath) {
+        String normalizedPath = normalizePath(filePath);
+        LambdaQueryWrapper<CameraManagement> wrapper = Wrappers.lambdaQuery();
+        wrapper.eq(CameraManagement::getStorageLocation, normalizedPath);
+        return baseMapper.selectCount(wrapper) > 0;
     }
 
     /**
@@ -464,39 +551,79 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
 
     /**
      * 上传单个摄像头视频文件
+     * 重要：先复制源文件到临时目录，再上传临时文件
+     * 因为 OssClient 会在 finally 中删除上传的文件，所以不能直接上传源文件
+     * 添加重试机制，提高上传成功率
      */
-    private CameraManagement uploadCameraVideo(CameraManagement camera, OssClient ossClient) {
-        try {
-            File file = new File(camera.getStorageLocation());
-            String contentType = detectContentType(file);
-            byte[] fileBytes = Files.readAllBytes(file.toPath());
+    private CameraManagement uploadCameraVideo(CameraManagement camera) {
+        File sourceFile = new File(camera.getStorageLocation());
+        String contentType = detectContentType(sourceFile);
+        String suffix = extractFileSuffix(sourceFile);
+        int maxRetries = 3;  // 最大重试次数
 
-            UploadResult uploadResult = ossClient.uploadSuffix(
-                fileBytes,
-                extractFileSuffix(file),
-                contentType
-            );
+        for (int retry = 0; retry < maxRetries; retry++) {
+            Path tempFile = null;
+            try {
+                if (retry > 0) {
+                    log.info("第 {} 次重试上传文件：{}", retry, sourceFile.getName());
+                    Thread.sleep(2000);  // 重试前等待2秒
+                }
 
-            if (uploadResult == null) {
-                log.error("文件上传返回结果为空：{}", file.getName());
-                return null;
+                // 每次循环获取 OssClient 实例，避免连接状态问题
+                OssClient currentClient = OssFactory.instance();
+                if (currentClient == null) {
+                    log.error("OssClient获取失败，第 {} 次尝试", retry + 1);
+                    continue;
+                }
+
+                // ⚠️ 关键：复制源文件到临时目录，避免源文件被 OssClient 删除
+                // OssClient.upload 方法会在 finally 中删除上传的文件
+                tempFile = Files.createTempFile("camera_upload_", suffix);
+                Files.copy(sourceFile.toPath(), tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                log.debug("已复制源文件到临时文件：{}", tempFile);
+
+                // 上传临时文件（OssClient 会删除临时文件，这是预期行为）
+                UploadResult uploadResult = currentClient.uploadSuffix(tempFile.toFile(), suffix);
+
+                if (uploadResult == null) {
+                    log.error("文件上传返回结果为空：{}", sourceFile.getName());
+                    continue;  // 重试
+                }
+
+                Long ossId = saveToSysOss(camera, currentClient, sourceFile, uploadResult, contentType);
+                if (ossId == null) {
+                    continue;  // 重试
+                }
+
+                updateCameraRecord(camera, uploadResult, ossId);
+                log.info("文件上传成功：{}，OSS ID：{}，文件大小：{} MB",
+                    sourceFile.getName(), ossId, String.format("%.2f", sourceFile.length() / (1024.0 * 1024.0)));
+
+                // 发送消息到RabbitMQ
+                sendUploadSuccessMessage(camera, uploadResult, ossId, sourceFile);
+
+                return camera;
+
+            } catch (Exception e) {
+                log.error("上传摄像头视频文件失败（第 {} 次尝试）：{}，错误：{}",
+                    retry + 1, camera.getStorageLocation(), e.getMessage());
+
+                // 如果是最后一次重试，记录完整堆栈
+                if (retry == maxRetries - 1) {
+                    log.error("上传文件最终失败，已达到最大重试次数：{}", camera.getStorageLocation(), e);
+                }
+
+                // 清理临时文件（如果 OssClient 没有删除的话）
+                if (tempFile != null) {
+                    try {
+                        Files.deleteIfExists(tempFile);
+                    } catch (IOException ignored) {
+                    }
+                }
             }
-
-            Long ossId = saveToSysOss(camera, ossClient, file, uploadResult, contentType);
-            if (ossId == null) return null;
-
-            updateCameraRecord(camera, uploadResult, ossId);
-            log.info("文件上传成功：{}，OSS ID：{}", file.getName(), ossId);
-
-            // 发送消息到RabbitMQ
-            sendUploadSuccessMessage(camera, uploadResult, ossId, file);
-
-            return camera;
-
-        } catch (Exception e) {
-            log.error("上传摄像头视频文件失败：{}", camera.getStorageLocation(), e);
-            return null;
         }
+
+        return null;
     }
 
     /**
@@ -505,7 +632,7 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
     private void sendUploadSuccessMessage(CameraManagement camera, UploadResult uploadResult,
                                           Long ossId, File file) {
         try {
-            rabbitMQService.sendMinioUrlMessage(
+            videoMessageService.sendMinioUrlMessage(
                 uploadResult.getUrl(),
                 ossId,
                 file.getAbsolutePath(),
@@ -836,7 +963,7 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
                 }
 
                 // 2. 直接调用外部服务并返回原始结果
-                String jsonResponse = externalAnalysisClient.analyzeVideoRaw(file);
+                String jsonResponse = videoAnalysisClient.analyzeVideoRaw(file);
 
                 // 3. 解析JSON响应为Map对象
                 ObjectMapper objectMapper = new ObjectMapper();

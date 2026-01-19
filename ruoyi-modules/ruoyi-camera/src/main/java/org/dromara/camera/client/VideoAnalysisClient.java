@@ -1,7 +1,6 @@
-package org.dromara.camera.service.impl;
+package org.dromara.camera.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -14,6 +13,7 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.util.EntityUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -23,14 +23,32 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-
-@Component
+/**
+ * 视频分析客户端
+ * 用于调用外部AI视频分析服务
+ *
+ * @author LionLi
+ */
 @Slf4j
-@RequiredArgsConstructor
-public class ExternalAnalysisClient {
+@Component
+public class VideoAnalysisClient {
 
-    private static final String ANALYSIS_SERVICE_URL = "http://192.168.26.28:8000/upload-video";
+    @Value("${camera.analysis.url:http://192.168.26.28:8000/upload-video}")
+    private String analysisServiceUrl;
 
+    @Value("${camera.analysis.connect-timeout:60000}")
+    private int connectTimeout;
+
+    @Value("${camera.analysis.socket-timeout:300000}")
+    private int socketTimeout;
+
+    /**
+     * 分析视频并返回原始JSON响应
+     *
+     * @param file 视频文件
+     * @return JSON响应字符串
+     * @throws IOException 如果请求失败
+     */
     public String analyzeVideoRaw(MultipartFile file) throws IOException {
         try (CloseableHttpClient httpClient = createHttpClient()) {
             HttpPost httpPost = createMultipartRequest(file);
@@ -51,18 +69,15 @@ public class ExternalAnalysisClient {
      * 创建HTTP客户端（配置连接池和超时）
      */
     private CloseableHttpClient createHttpClient() {
-        // 配置超时参数
         RequestConfig requestConfig = RequestConfig.custom()
-            .setConnectTimeout(60000)      // 连接超时 60秒
-            .setSocketTimeout(300000)      // 读取超时 300秒（5分钟）
-            .setConnectionRequestTimeout(60000) // 获取连接超时 60秒
+            .setConnectTimeout(connectTimeout)
+            .setSocketTimeout(socketTimeout)
+            .setConnectionRequestTimeout(connectTimeout)
             .build();
 
-        // 配置连接池
-        PoolingHttpClientConnectionManager connectionManager =
-            new PoolingHttpClientConnectionManager();
-        connectionManager.setMaxTotal(100);           // 最大连接数
-        connectionManager.setDefaultMaxPerRoute(20);  // 每个路由最大连接数
+        PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager();
+        connectionManager.setMaxTotal(100);
+        connectionManager.setDefaultMaxPerRoute(20);
 
         return HttpClients.custom()
             .setConnectionManager(connectionManager)
@@ -78,7 +93,6 @@ public class ExternalAnalysisClient {
             file.getOriginalFilename(),
             String.format("%.2f", file.getSize() / (1024.0 * 1024.0)));
 
-        // 构建multipart实体
         MultipartEntityBuilder builder = MultipartEntityBuilder.create()
             .setMode(HttpMultipartMode.BROWSER_COMPATIBLE)
             .addPart("file", new ByteArrayBody(
@@ -88,8 +102,7 @@ public class ExternalAnalysisClient {
             ))
             .addTextBody("timestamp", String.valueOf(System.currentTimeMillis()));
 
-        // 创建请求
-        HttpPost httpPost = new HttpPost(ANALYSIS_SERVICE_URL);
+        HttpPost httpPost = new HttpPost(analysisServiceUrl);
         httpPost.setEntity(builder.build());
         httpPost.setHeader("Accept", "application/json");
 
@@ -105,7 +118,6 @@ public class ExternalAnalysisClient {
 
         log.info("分析接口响应 - 状态码: {}, 响应体长度: {}", statusCode, responseBody.length());
 
-        // 检查HTTP状态码
         if (statusCode != 200) {
             handleErrorResponse(statusCode, responseBody);
         }
@@ -116,6 +128,7 @@ public class ExternalAnalysisClient {
     /**
      * 处理错误响应
      */
+    @SuppressWarnings("unchecked")
     private void handleErrorResponse(int statusCode, String responseBody) throws IOException {
         try {
             ObjectMapper objectMapper = new ObjectMapper();
@@ -130,4 +143,3 @@ public class ExternalAnalysisClient {
         }
     }
 }
-
