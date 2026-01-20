@@ -945,10 +945,8 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
                 // 设置创建时间为当前时间
                 entity.setUploadTime(new Date());
 
-                // 可根据需要添加其他字段：
-                // entity.setFileName(extractFileName(path));
-                // entity.setFileSize(getFileSize(path));
-                // entity.setFileType(extractFileExtension(path));
+                // 设置数据来源（字典类型：camera_data_source，字典键值：scan）
+                entity.setDataSource("scan");
 
                 return entity;
             })
