@@ -42,7 +42,7 @@ import java.util.Map;
 @Validated
 @RequiredArgsConstructor
 @RestController
-@RequestMapping("/camera/management")
+@RequestMapping("/management")
 public class CameraManagementController extends BaseController {
 
     private final ICameraManagementService cameraManagementService;

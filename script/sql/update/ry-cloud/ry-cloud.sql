@@ -1,5 +1,5 @@
 ALTER TABLE `camera_management`
-    ADD COLUMN `oss_id`    bigint                                  DEFAULT NULL COMMENT 'OSS文件ID';
+    ADD COLUMN `oss_id` bigint DEFAULT NULL COMMENT 'OSS文件ID';
 
 -- ==================== 1. 添加唯一索引（防止重复导入）====================
 ALTER TABLE camera_management
