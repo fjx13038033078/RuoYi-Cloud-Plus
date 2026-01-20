@@ -18,7 +18,7 @@ import java.util.List;
 @Slf4j
 @RequiredArgsConstructor
 @Service
-@DubboService(version = "1.0.0", timeout = 60000)
+@DubboService(version = "1.0.0")
 public class RemoteCameraServiceImpl implements ICameraManagementDubboService {
 
     private final ICameraManagementService cameraManagementService;

@@ -6,6 +6,8 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import io.github.linpeilie.annotations.AutoMapper;
 import lombok.Data;
 import org.dromara.camera.domain.CameraManagement;
+import org.dromara.common.translation.annotation.Translation;
+import org.dromara.common.translation.constant.TransConstant;
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -123,5 +125,16 @@ public class CameraManagementVo implements Serializable {
      */
     @ExcelProperty(value = "数据状态")
     private Integer dataStatus;  // 改为 Integer
+
+    /**
+     * OSS文件ID
+     */
+    private Long ossId;
+
+    /**
+     * MinIO文件URL（通过ossId翻译获取）
+     */
+    @Translation(type = TransConstant.OSS_ID_TO_URL, mapper = "ossId")
+    private String url;
 
 }

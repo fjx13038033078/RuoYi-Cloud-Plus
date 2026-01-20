@@ -58,9 +58,6 @@ import static org.springframework.web.util.UriUtils.extractFileExtension;
  * @author LionLi
  * @date 2025-12-05
  */
-//@Slf4j
-//@RequiredArgsConstructor
-//@Service
 @Slf4j
 @RequiredArgsConstructor
 @Service
@@ -490,7 +487,6 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
                 }
 
                 // 保存 camera_management 记录
-                entity.setMinioUrl(uploadResult.getUrl());
                 baseMapper.insert(entity);
 
                 // 保存 sys_oss 记录
@@ -829,7 +825,6 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
      * 更新摄像头记录
      */
     private void updateCameraRecord(CameraManagement camera, UploadResult uploadResult, Long ossId) {
-        camera.setMinioUrl(uploadResult.getUrl());
         camera.setOssId(ossId);
         baseMapper.updateById(camera);
     }

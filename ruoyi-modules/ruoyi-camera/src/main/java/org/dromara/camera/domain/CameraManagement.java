@@ -111,14 +111,8 @@ public class CameraManagement extends TenantEntity {
     @TableLogic
     private Long delFlag;
 
-    // ============= 新增字段：MinIO存储相关信息 =============
     /**
-     * OSS文件ID
+     * OSS文件ID（关联sys_oss表）
      */
     private Long ossId;
-
-    /**
-     * MinIO存储的URL
-     */
-    private String minioUrl;
 }
