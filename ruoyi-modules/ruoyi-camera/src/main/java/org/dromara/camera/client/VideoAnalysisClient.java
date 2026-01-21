@@ -33,7 +33,8 @@ import java.util.Map;
 @Component
 public class VideoAnalysisClient {
 
-    @Value("${camera.analysis.url:http://192.168.26.28:8000/upload-video}")
+//    @Value("${camera.analysis.url:http://192.168.26.28:8000/upload-video}")
+    @Value("${camera.analysis.url:http://localhost:8000/upload-video}")
     private String analysisServiceUrl;
 
     @Value("${camera.analysis.connect-timeout:60000}")

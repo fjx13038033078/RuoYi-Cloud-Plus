@@ -14,6 +14,7 @@ import org.apache.commons.lang3.Validate;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.dromara.camera.client.VideoAnalysisClient;
 import org.dromara.camera.domain.VideoUploadMessage;
+import org.dromara.camera.domain.VideoAnalysisResult;
 import org.dromara.camera.service.IVideoMessageService;
 import org.dromara.camera.domain.CameraManagement;
 import org.dromara.camera.domain.bo.CameraManagementBo;
@@ -41,6 +42,7 @@ import java.time.Duration;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
+import java.util.HashMap;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.file.Files;
@@ -1257,5 +1259,102 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
             log.error("生成视频播放URL失败，videoId: {}, url: {}", videoId, originalUrl, e);
             throw new ServiceException("生成视频播放URL失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 更新AI分析结果
+     * 接收Python端回传的检测结果，更新数据库记录
+     *
+     * @param result AI分析结果
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateAnalysisResult(VideoAnalysisResult result) {
+        Long videoId = result.getVideoId();
+        log.info("开始更新AI分析结果: videoId={}, taskId={}, status={}",
+            videoId, result.getTaskId(), result.getStatus());
+
+        // 1. 查询视频记录
+        CameraManagement camera = baseMapper.selectById(videoId);
+        if (camera == null) {
+            log.error("视频记录不存在: videoId={}", videoId);
+            throw new ServiceException("视频记录不存在: " + videoId);
+        }
+
+        // 2. 更新检测状态和结果
+        CameraManagement update = new CameraManagement();
+        update.setVideoId(videoId);
+
+        if (result.isSuccess()) {
+            // 检测成功
+            update.setAiCheckStatus(2L);  // 2: 检测完成
+            // 将AI描述包装成JSON格式（兼容数据库JSON类型字段）
+            update.setAiCheckResult(wrapAsJson(result.getAiDescription()));
+            update.setHasViolation(result.hasViolationBehavior() ? 1 : 0);
+            update.setViolationType(result.getViolationType());
+            update.setScreenshotUrl(result.getScreenshotUrl());
+            update.setProcessTime(result.getProcessTime());
+            update.setCheckTime(new Date());
+
+            log.info("AI检测完成: videoId={}, hasViolation={}, violationType={}",
+                videoId, result.getHasViolation(), result.getViolationType());
+
+        } else {
+            // 检测失败
+            update.setAiCheckStatus(3L);  // 3: 检测失败
+            update.setAiCheckResult(wrapAsJson("检测失败: " + result.getErrorMessage()));
+            update.setCheckTime(new Date());
+
+            log.warn("AI检测失败: videoId={}, error={}", videoId, result.getErrorMessage());
+        }
+
+        // 3. 执行更新
+        baseMapper.updateById(update);
+
+        log.info("AI分析结果更新成功: videoId={}, aiCheckStatus={}",
+            videoId, update.getAiCheckStatus());
+    }
+
+    /**
+     * 更新AI检测状态
+     *
+     * @param videoId 视频ID
+     * @param status  状态（0:未检测,1:检测中,2:检测完成,3:检测失败）
+     */
+    @Override
+    public void updateAiCheckStatus(Long videoId, Integer status) {
+        CameraManagement update = new CameraManagement();
+        update.setVideoId(videoId);
+        update.setAiCheckStatus(Long.valueOf(status));
+
+        if (status == 1) {
+            // 检测中状态，记录开始时间
+            log.info("更新AI检测状态为检测中: videoId={}", videoId);
+        }
+
+        baseMapper.updateById(update);
+    }
+
+    /**
+     * 将文本包装成JSON格式
+     * 兼容数据库中ai_check_result字段为JSON类型的情况
+     *
+     * @param text 原始文本
+     * @return JSON格式字符串
+     */
+    private String wrapAsJson(String text) {
+        if (StringUtils.isBlank(text)) {
+            return null;
+        }
+        // 如果已经是JSON格式，直接返回
+        String trimmed = text.trim();
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}"))
+            || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            return text;
+        }
+        // 将纯文本包装成JSON对象
+        Map<String, String> wrapper = new HashMap<>();
+        wrapper.put("description", text);
+        return JsonUtils.toJsonString(wrapper);
     }
 }

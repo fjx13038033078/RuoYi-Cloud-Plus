@@ -121,6 +121,34 @@ public class CameraManagementVo implements Serializable {
     private String aiCheckResult;
 
     /**
+     * 是否有违规行为（0:否,1:是）
+     */
+    @ExcelProperty(value = "是否违规")
+    private Integer hasViolation;
+
+    /**
+     * 违规类型
+     */
+    @ExcelProperty(value = "违规类型")
+    private String violationType;
+
+    /**
+     * 违规截图URL
+     */
+    private String screenshotUrl;
+
+    /**
+     * AI检测耗时（秒）
+     */
+    private Double processTime;
+
+    /**
+     * AI检测完成时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date checkTime;
+
+    /**
      * 数据状态（1:正常,0:删除）
      */
     @ExcelProperty(value = "数据状态")

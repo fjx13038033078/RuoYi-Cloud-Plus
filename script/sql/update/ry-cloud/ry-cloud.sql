@@ -48,3 +48,15 @@ VALUES (1881234567892001, '000000', 1, '执法记录仪自动上传', 'auto', 'c
         NOW(), ''),
        (1881234567892004, '000000', 4, '文件夹扫描', 'scan', 'camera_data_source', '', 'warning', 'Y', 100, 1, NOW(), 1,
         NOW(), '');
+
+-- 为 camera_management 表添加违规相关字段
+ALTER TABLE camera_management
+    ADD COLUMN has_violation  INT(1)       DEFAULT 0 COMMENT '是否有违规行为（0:否,1:是）' AFTER ai_check_result,
+    ADD COLUMN violation_type VARCHAR(100) DEFAULT NULL COMMENT '违规类型' AFTER has_violation,
+    ADD COLUMN screenshot_url VARCHAR(500) DEFAULT NULL COMMENT '违规截图URL' AFTER violation_type,
+    ADD COLUMN process_time   DOUBLE       DEFAULT NULL COMMENT 'AI检测耗时（秒）' AFTER screenshot_url,
+    ADD COLUMN check_time     DATETIME     DEFAULT NULL COMMENT 'AI检测完成时间' AFTER process_time;
+
+-- 添加索引优化查询
+CREATE INDEX idx_camera_has_violation ON camera_management (has_violation);
+CREATE INDEX idx_camera_check_time ON camera_management (check_time);

@@ -1,6 +1,7 @@
 package org.dromara.camera.service;
 
 import org.dromara.camera.domain.CameraManagement;
+import org.dromara.camera.domain.VideoAnalysisResult;
 import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.common.mybatis.core.page.PageQuery;
@@ -99,4 +100,20 @@ public interface ICameraManagementService {
      * @return 预签名播放URL
      */
     String getVideoPlayUrl(Long videoId);
+
+    /**
+     * 更新AI分析结果
+     * 接收Python端回传的检测结果，更新数据库记录
+     *
+     * @param result AI分析结果
+     */
+    void updateAnalysisResult(VideoAnalysisResult result);
+
+    /**
+     * 更新AI检测状态
+     *
+     * @param videoId 视频ID
+     * @param status  状态（0:未检测,1:检测中,2:检测完成,3:检测失败）
+     */
+    void updateAiCheckStatus(Long videoId, Integer status);
 }

@@ -101,6 +101,31 @@ public class CameraManagement extends TenantEntity {
     private String aiCheckResult;
 
     /**
+     * 是否有违规行为（0:否,1:是）
+     */
+    private Integer hasViolation;
+
+    /**
+     * 违规类型（如：未戴安全帽、违规操作等）
+     */
+    private String violationType;
+
+    /**
+     * 违规截图URL
+     */
+    private String screenshotUrl;
+
+    /**
+     * AI检测耗时（秒）
+     */
+    private Double processTime;
+
+    /**
+     * AI检测完成时间
+     */
+    private java.util.Date checkTime;
+
+    /**
      * 数据状态（1:正常,0:删除）
      */
     private Long dataStatus;

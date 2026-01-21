@@ -23,9 +23,20 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class VideoMqConfig {
 
+    // 视频上传队列配置（发送给Python）
     private final String videoUploadQueue;
     private final String videoUploadExchange;
     private final String videoUploadRoutingKey;
+
+    // 结果队列配置（接收Python回传的结果）
+    @Value("${spring.rabbitmq.video-result.queue:video.result.queue}")
+    private String videoResultQueue;
+
+    @Value("${spring.rabbitmq.video-result.exchange:video.result.exchange}")
+    private String videoResultExchange;
+
+    @Value("${spring.rabbitmq.video-result.routing-key:video.result.finish}")
+    private String videoResultRoutingKey;
 
     public VideoMqConfig(
         @Value("${spring.rabbitmq.video-upload.queue}") String videoUploadQueue,
@@ -78,6 +89,40 @@ public class VideoMqConfig {
             .bind(videoUploadQueue())
             .to(videoUploadExchange())
             .with(videoUploadRoutingKey);
+    }
+
+    // ==================== 结果队列配置（接收Python回传的检测结果） ====================
+
+    /**
+     * 视频结果队列（接收AI检测结果）
+     */
+    @Bean
+    public Queue videoResultQueue() {
+        return QueueBuilder.durable(videoResultQueue)
+            .withArgument("x-max-length", 10000)
+            .build();
+    }
+
+    /**
+     * 视频结果交换机（Topic Exchange）
+     */
+    @Bean
+    public TopicExchange videoResultExchange() {
+        return ExchangeBuilder
+            .topicExchange(videoResultExchange)
+            .durable(true)
+            .build();
+    }
+
+    /**
+     * 绑定结果队列和交换机
+     */
+    @Bean
+    public Binding videoResultBinding() {
+        return BindingBuilder
+            .bind(videoResultQueue())
+            .to(videoResultExchange())
+            .with(videoResultRoutingKey);
     }
 
     /**
