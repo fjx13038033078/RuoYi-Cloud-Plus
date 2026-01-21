@@ -91,4 +91,12 @@ public interface ICameraManagementService {
      * @return 分析结果
      */
     Map<String, Object> analyzeVideo(MultipartFile file);
+
+    /**
+     * 获取视频播放URL（预签名URL，用于私有bucket访问）
+     *
+     * @param videoId 视频ID
+     * @return 预签名播放URL
+     */
+    String getVideoPlayUrl(Long videoId);
 }

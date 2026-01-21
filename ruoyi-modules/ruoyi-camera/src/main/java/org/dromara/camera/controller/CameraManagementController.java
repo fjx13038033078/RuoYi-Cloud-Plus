@@ -164,4 +164,18 @@ public class CameraManagementController extends BaseController {
             return R.fail("视频分析失败: " + e.getMessage());
         }
     }
+
+    /**
+     * 获取视频播放URL（预签名URL，用于私有bucket访问）
+     *
+     * @param videoId 视频ID
+     * @return 预签名播放URL
+     */
+    @SaCheckPermission("camera:management:query")
+    @GetMapping("/playUrl/{videoId}")
+    public R<String> getPlayUrl(@NotNull(message = "视频ID不能为空")
+                                @PathVariable("videoId") Long videoId) {
+        String playUrl = cameraManagementService.getVideoPlayUrl(videoId);
+        return R.ok("获取成功", playUrl);
+    }
 }

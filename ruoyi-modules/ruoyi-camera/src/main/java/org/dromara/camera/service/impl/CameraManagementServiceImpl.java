@@ -1,5 +1,6 @@
 package org.dromara.camera.service.impl;
 
+import cn.hutool.core.collection.CollUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.dromara.camera.client.VideoAnalysisClient;
 import org.dromara.camera.domain.VideoUploadMessage;
 import org.dromara.camera.service.IVideoMessageService;
@@ -18,6 +20,7 @@ import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.camera.mapper.CameraManagementMapper;
 import org.dromara.camera.service.ICameraManagementService;
+import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.core.utils.MapstructUtils;
 import org.dromara.common.core.utils.StringUtils;
 import org.dromara.common.json.utils.JsonUtils;
@@ -26,6 +29,8 @@ import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.common.oss.core.OssClient;
 import org.dromara.common.oss.entity.UploadResult;
 import org.dromara.common.oss.factory.OssFactory;
+import org.dromara.resource.api.RemoteFileService;
+import org.dromara.resource.api.domain.RemoteFile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -71,9 +76,17 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
 
     private final VideoAnalysisClient videoAnalysisClient;
 
+    @DubboReference
+    private RemoteFileService remoteFileService;
+
     private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList("mp4", "avi", "mov", "wmv", "flv", "mkv");
 
     private static final long MAX_FILE_SIZE = 500 * 1024 * 1024;
+
+    /**
+     * 视频播放预签名URL有效期（24小时）
+     */
+    private static final Duration VIDEO_PLAY_URL_EXPIRATION = Duration.ofHours(24);
 
     /**
      * 查询执法视频信息管理
@@ -1191,5 +1204,58 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
         if (size < 1024 * 1024) return String.format("%.2f KB", size / 1024.0); // 小于1MB，显示KB
         if (size < 1024 * 1024 * 1024) return String.format("%.2f MB", size / (1024.0 * 1024.0)); // 小于1GB，显示MB
         return String.format("%.2f GB", size / (1024.0 * 1024.0 * 1024.0)); // 大于等于1GB，显示GB
+    }
+
+    /**
+     * 获取视频播放URL（预签名URL，用于私有bucket访问）
+     *
+     * @param videoId 视频ID
+     * @return 预签名播放URL
+     */
+    @Override
+    public String getVideoPlayUrl(Long videoId) {
+        log.info("获取视频播放URL，videoId: {}", videoId);
+
+        // 1. 查询视频信息
+        CameraManagement camera = baseMapper.selectById(videoId);
+        if (camera == null) {
+            throw new ServiceException("视频不存在");
+        }
+        log.info("查询到视频记录，ossId: {}", camera.getOssId());
+
+        // 2. 检查是否有OSS文件
+        Long ossId = camera.getOssId();
+        if (ossId == null) {
+            // 如果没有上传到OSS，返回本地存储路径（可能无法播放）
+            log.warn("视频[{}]未上传到OSS，返回本地路径: {}", videoId, camera.getStorageLocation());
+            return camera.getStorageLocation();
+        }
+
+        // 3. 通过Dubbo获取文件信息
+        List<RemoteFile> files = remoteFileService.selectByIds(String.valueOf(ossId));
+        log.info("Dubbo查询OSS文件，ossId: {}, 返回数量: {}", ossId, files != null ? files.size() : 0);
+
+        if (CollUtil.isEmpty(files)) {
+            throw new ServiceException("OSS文件信息不存在");
+        }
+
+        RemoteFile remoteFile = files.get(0);
+        String originalUrl = remoteFile.getUrl();
+        log.info("获取到OSS文件信息，fileName: {}, url: {}", remoteFile.getName(), originalUrl);
+
+        // 4. 获取OssClient并生成预签名URL
+        try {
+            OssClient ossClient = OssFactory.instance();
+            // 从URL中提取objectName（去除域名和bucket前缀）
+            String objectName = ossClient.removeBaseUrl(originalUrl);
+            log.info("提取objectName: {}", objectName);
+
+            String presignedUrl = ossClient.getPrivateUrl(objectName, VIDEO_PLAY_URL_EXPIRATION);
+            log.info("生成预签名URL成功，videoId: {}, presignedUrl: {}", videoId, presignedUrl);
+            return presignedUrl;
+        } catch (Exception e) {
+            log.error("生成视频播放URL失败，videoId: {}, url: {}", videoId, originalUrl, e);
+            throw new ServiceException("生成视频播放URL失败: " + e.getMessage());
+        }
     }
 }
