@@ -22,6 +22,66 @@
 
 > 系统演示: [传送门](https://plus-doc.dromara.org/#/common/demo_system)
 
+---
+
+## 🎥 执法记录仪智能分析模块 (ruoyi-camera)
+
+本项目在 RuoYi-Cloud-Plus 基础上，扩展了 **执法记录仪视频智能分析模块**，实现对执法视频的自动化管理与 AI 智能检测。
+
+### 核心功能
+
+| 功能 | 说明 |
+|------|------|
+| 📁 **视频自动采集** | 定时任务自动扫描指定文件夹，批量导入执法视频到 MinIO 存储 |
+| 🔄 **异步消息处理** | 基于 RabbitMQ 实现视频上传与 AI 分析的异步解耦 |
+| 🤖 **AI 智能分析** | 对接大语言视觉模型（Qwen-VL），自动识别视频中的违规行为 |
+| 📊 **结果回传** | Python 端检测完成后，结果自动回传 Java 端并更新数据库 |
+| 🖼️ **违规截图** | 检测到违规时自动截取关键帧，上传至 MinIO 并关联记录 |
+| 📺 **安全播放** | 基于预签名 URL 实现私有存储桶视频的安全播放 |
+
+### 技术架构
+
+```
+┌─────────────────┐     RabbitMQ      ┌─────────────────┐
+│   Java 后端     │ ───────────────► │   Python 端     │
+│  (ruoyi-camera) │   video.upload    │   (FastAPI)     │
+│                 │ ◄─────────────── │                 │
+│  - 视频管理     │   video.result    │  - Qwen-VL 推理 │
+│  - MinIO 存储   │                   │  - 违规检测     │
+│  - 定时扫描     │                   │  - 截图上传     │
+└─────────────────┘                   └─────────────────┘
+```
+
+### 模块结构
+
+```
+ruoyi-camera/
+├── client/                 # 外部服务客户端
+│   └── VideoAnalysisClient # AI 分析服务调用
+├── config/                 # 配置类
+│   └── VideoMqConfig       # RabbitMQ 队列配置
+├── consumer/               # 消息消费者
+│   └── VideoResultConsumer # AI 结果回传消费
+├── controller/             # REST 接口
+├── domain/                 # 实体与 DTO
+│   ├── CameraManagement    # 视频信息实体
+│   ├── VideoUploadMessage  # MQ 上传消息
+│   └── VideoAnalysisResult # MQ 结果消息
+├── dubbo/                  # Dubbo 远程服务
+├── mapper/                 # 数据访问层
+└── service/                # 业务逻辑层
+    ├── ICameraManagementService  # 视频管理服务
+    └── IVideoMessageService      # 消息队列服务
+```
+
+### 数据流程
+
+1. **视频采集**: 定时任务扫描文件夹 → 上传 MinIO → 写入数据库 → 发送 MQ 消息
+2. **AI 分析**: Python 消费 MQ → 调用视觉模型 → 检测违规行为 → 截取关键帧
+3. **结果回传**: Python 发送结果到 MQ → Java 消费并更新数据库 → 前端展示
+
+---
+
 > 官方前端项目地址: [gitee](https://gitee.com/JavaLionLi/plus-ui) - [github](https://github.com/JavaLionLi/plus-ui) - [gitcode](https://gitcode.com/dromara/plus-ui)<br>
 > 成员前端项目地址: 基于vben5 [ruoyi-plus-vben5](https://gitee.com/dapppp/ruoyi-plus-vben5)<br>
 > 成员前端项目地址: 基于soybean [ruoyi-plus-soybean](https://gitee.com/xlsea/ruoyi-plus-soybean)<br>
