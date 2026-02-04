@@ -38,6 +38,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.time.Duration;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -553,94 +555,94 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
         return baseMapper.selectCount(wrapper) > 0;
     }
 
-    /**
-     * 检查视频文件是否有效
-     */
-    private boolean isValidVideoFile(CameraManagement camera) {
-        File file = new File(camera.getStorageLocation());
-        boolean isValid = file.exists() && file.isFile();
-        if (!isValid) {
-            log.warn("视频文件无效或不存在：{}", camera.getStorageLocation());
-        }
-        return isValid;
-    }
+//    /**
+//     * 检查视频文件是否有效
+//     */
+//    private boolean isValidVideoFile(CameraManagement camera) {
+//        File file = new File(camera.getStorageLocation());
+//        boolean isValid = file.exists() && file.isFile();
+//        if (!isValid) {
+//            log.warn("视频文件无效或不存在：{}", camera.getStorageLocation());
+//        }
+//        return isValid;
+//    }
 
-    /**
-     * 上传单个摄像头视频文件
-     * 重要：先复制源文件到临时目录，再上传临时文件
-     * 因为 OssClient 会在 finally 中删除上传的文件，所以不能直接上传源文件
-     * 添加重试机制，提高上传成功率
-     */
-    private CameraManagement uploadCameraVideo(CameraManagement camera) {
-        File sourceFile = new File(camera.getStorageLocation());
-        String contentType = detectContentType(sourceFile);
-        String suffix = extractFileSuffix(sourceFile);
-        int maxRetries = 3;  // 最大重试次数
-
-        for (int retry = 0; retry < maxRetries; retry++) {
-            Path tempFile = null;
-            try {
-                if (retry > 0) {
-                    log.info("第 {} 次重试上传文件：{}", retry, sourceFile.getName());
-                    Thread.sleep(2000);  // 重试前等待2秒
-                }
-
-                // 每次循环获取 OssClient 实例，避免连接状态问题
-                OssClient currentClient = OssFactory.instance();
-                if (currentClient == null) {
-                    log.error("OssClient获取失败，第 {} 次尝试", retry + 1);
-                    continue;
-                }
-
-                // ⚠️ 关键：复制源文件到临时目录，避免源文件被 OssClient 删除
-                // OssClient.upload 方法会在 finally 中删除上传的文件
-                tempFile = Files.createTempFile("camera_upload_", suffix);
-                Files.copy(sourceFile.toPath(), tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                log.debug("已复制源文件到临时文件：{}", tempFile);
-
-                // 上传临时文件（OssClient 会删除临时文件，这是预期行为）
-                UploadResult uploadResult = currentClient.uploadSuffix(tempFile.toFile(), suffix);
-
-                if (uploadResult == null) {
-                    log.error("文件上传返回结果为空：{}", sourceFile.getName());
-                    continue;  // 重试
-                }
-
-                Long ossId = saveToSysOss(camera, currentClient, sourceFile, uploadResult, contentType);
-                if (ossId == null) {
-                    continue;  // 重试
-                }
-
-                updateCameraRecord(camera, uploadResult, ossId);
-                log.info("文件上传成功：{}，OSS ID：{}，文件大小：{} MB",
-                    sourceFile.getName(), ossId, String.format("%.2f", sourceFile.length() / (1024.0 * 1024.0)));
-
-                // 发送消息到RabbitMQ（事务提交后执行）
-                sendUploadSuccessMessage(camera, uploadResult, ossId, sourceFile, currentClient);
-
-                return camera;
-
-            } catch (Exception e) {
-                log.error("上传摄像头视频文件失败（第 {} 次尝试）：{}，错误：{}",
-                    retry + 1, camera.getStorageLocation(), e.getMessage());
-
-                // 如果是最后一次重试，记录完整堆栈
-                if (retry == maxRetries - 1) {
-                    log.error("上传文件最终失败，已达到最大重试次数：{}", camera.getStorageLocation(), e);
-                }
-
-                // 清理临时文件（如果 OssClient 没有删除的话）
-                if (tempFile != null) {
-                    try {
-                        Files.deleteIfExists(tempFile);
-                    } catch (IOException ignored) {
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
+//    /**
+//     * 上传单个摄像头视频文件
+//     * 重要：先复制源文件到临时目录，再上传临时文件
+//     * 因为 OssClient 会在 finally 中删除上传的文件，所以不能直接上传源文件
+//     * 添加重试机制，提高上传成功率
+//     */
+//    private CameraManagement uploadCameraVideo(CameraManagement camera) {
+//        File sourceFile = new File(camera.getStorageLocation());
+//        String contentType = detectContentType(sourceFile);
+//        String suffix = extractFileSuffix(sourceFile);
+//        int maxRetries = 3;  // 最大重试次数
+//
+//        for (int retry = 0; retry < maxRetries; retry++) {
+//            Path tempFile = null;
+//            try {
+//                if (retry > 0) {
+//                    log.info("第 {} 次重试上传文件：{}", retry, sourceFile.getName());
+//                    Thread.sleep(2000);  // 重试前等待2秒
+//                }
+//
+//                // 每次循环获取 OssClient 实例，避免连接状态问题
+//                OssClient currentClient = OssFactory.instance();
+//                if (currentClient == null) {
+//                    log.error("OssClient获取失败，第 {} 次尝试", retry + 1);
+//                    continue;
+//                }
+//
+//                // ⚠️ 关键：复制源文件到临时目录，避免源文件被 OssClient 删除
+//                // OssClient.upload 方法会在 finally 中删除上传的文件
+//                tempFile = Files.createTempFile("camera_upload_", suffix);
+//                Files.copy(sourceFile.toPath(), tempFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+//                log.debug("已复制源文件到临时文件：{}", tempFile);
+//
+//                // 上传临时文件（OssClient 会删除临时文件，这是预期行为）
+//                UploadResult uploadResult = currentClient.uploadSuffix(tempFile.toFile(), suffix);
+//
+//                if (uploadResult == null) {
+//                    log.error("文件上传返回结果为空：{}", sourceFile.getName());
+//                    continue;  // 重试
+//                }
+//
+//                Long ossId = saveToSysOss(camera, currentClient, sourceFile, uploadResult, contentType);
+//                if (ossId == null) {
+//                    continue;  // 重试
+//                }
+//
+//                updateCameraRecord(camera, uploadResult, ossId);
+//                log.info("文件上传成功：{}，OSS ID：{}，文件大小：{} MB",
+//                    sourceFile.getName(), ossId, String.format("%.2f", sourceFile.length() / (1024.0 * 1024.0)));
+//
+//                // 发送消息到RabbitMQ（事务提交后执行）
+//                sendUploadSuccessMessage(camera, uploadResult, ossId, sourceFile, currentClient);
+//
+//                return camera;
+//
+//            } catch (Exception e) {
+//                log.error("上传摄像头视频文件失败（第 {} 次尝试）：{}，错误：{}",
+//                    retry + 1, camera.getStorageLocation(), e.getMessage());
+//
+//                // 如果是最后一次重试，记录完整堆栈
+//                if (retry == maxRetries - 1) {
+//                    log.error("上传文件最终失败，已达到最大重试次数：{}", camera.getStorageLocation(), e);
+//                }
+//
+//                // 清理临时文件（如果 OssClient 没有删除的话）
+//                if (tempFile != null) {
+//                    try {
+//                        Files.deleteIfExists(tempFile);
+//                    } catch (IOException ignored) {
+//                    }
+//                }
+//            }
+//        }
+//
+//        return null;
+//    }
 
     /**
      * 预签名URL有效期（24小时）
@@ -836,13 +838,13 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
         return suffix.length() > 10 ? suffix.substring(0, 10) : suffix;
     }
 
-    /**
-     * 更新摄像头记录
-     */
-    private void updateCameraRecord(CameraManagement camera, UploadResult uploadResult, Long ossId) {
-        camera.setOssId(ossId);
-        baseMapper.updateById(camera);
-    }
+//    /**
+//     * 更新摄像头记录
+//     */
+//    private void updateCameraRecord(CameraManagement camera, UploadResult uploadResult, Long ossId) {
+//        camera.setOssId(ossId);
+//        baseMapper.updateById(camera);
+//    }
 
     /**
      * 探测文件Content-Type
@@ -953,9 +955,8 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
                 String fileExtension = extractFileExtension(path);
                 entity.setMediaType(fileExtension);
 
-                // 从文件路径中提取用户名（如路径：D:/执法记录仪/出矿1队/张三11.1/xxx.mp4 -> 提取"张三"）
-                String userName = extractUserNameFromPath(path);
-                entity.setUserName(userName);
+                // 从文件名中提取结构化信息
+                extractInfoFromFileName(entity, path);
 
                 // 设置创建时间为当前时间
                 entity.setUploadTime(new Date());
@@ -970,6 +971,148 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
                 log.warn("文件不存在，跳过处理: {}", filePath);
                 return null;
             });
+    }
+
+    /**
+     * 从文件名中提取结构化信息
+     * 示例文件名: 63_tky23_Q541062_20250802160820.mp4
+     * 格式: 用户编号_单位编号_设备序列号_时间戳.扩展名
+     *
+     * @param entity CameraManagement实体对象
+     * @param filePath 文件路径
+     */
+    private void extractInfoFromFileName(CameraManagement entity, String filePath) {
+        File file = new File(filePath);
+        String fileName = file.getName();
+
+        // 移除文件扩展名
+        String fileNameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.'));
+
+        // 使用下划线分割文件名
+        String[] parts = fileNameWithoutExt.split("_");
+
+        if (parts.length >= 4) {
+            // 用户编号（第1部分）
+            String userCode = parts[0];
+            entity.setUserCode(userCode);
+
+            // 单位编号（第2部分）
+            String unitNumber = parts[1];
+            entity.setUnitNumber(unitNumber);
+
+            // 设备序列号（第3部分）
+            String deviceId = parts[2];
+            entity.setDeviceId(deviceId);
+
+            // 时间戳（第4部分）- 转换为Date对象
+            String timestampStr = parts[3];
+            Date shootTime = parseTimestamp(timestampStr);
+            if (shootTime != null) {
+                entity.setShootTime(shootTime);
+            }
+
+            // 如果还有更多部分（如可能有额外的描述信息），可以合并到userName中
+            if (parts.length > 4) {
+                StringBuilder description = new StringBuilder();
+                for (int i = 4; i < parts.length; i++) {
+                    if (i > 4) description.append("_");
+                    description.append(parts[i]);
+                }
+                // 可以将描述信息存储到userName字段
+                String userName = extractUserNameFromPath(filePath) + "_" + description.toString();
+                entity.setUserName(userName);
+            } else {
+                // 如果没有额外描述，使用从路径提取的用户名
+                String userName = extractUserNameFromPath(filePath);
+                entity.setUserName(userName);
+            }
+
+            log.debug("从文件名解析信息: userCode={}, unitNumber={}, deviceId={}, shootTime={}",
+                userCode, unitNumber, deviceId, shootTime);
+        } else {
+            // 文件名格式不符合预期，使用备用提取方法
+            log.warn("文件名格式不符合预期，使用备用提取方法: {}", fileName);
+            fallbackInfoExtraction(entity, fileName, filePath);
+        }
+    }
+
+    /**
+     * 备用的信息提取方法（当文件名格式不符合预期时使用）
+     * 尝试从其他部分提取信息
+     *
+     * @param entity CameraManagement实体对象
+     * @param fileName 文件名
+     * @param filePath 文件路径
+     */
+    private void fallbackInfoExtraction(CameraManagement entity, String fileName, String filePath) {
+        // 从路径提取用户名
+        String userName = extractUserNameFromPath(filePath);
+        entity.setUserName(userName);
+
+        // 尝试从文件名中提取可能的设备ID（可能包含字母数字序列）
+        Pattern deviceIdPattern = Pattern.compile("Q[0-9]+|[A-Z][0-9]+");
+        Matcher matcher = deviceIdPattern.matcher(fileName);
+        if (matcher.find()) {
+            entity.setDeviceId(matcher.group());
+        }
+
+        // 尝试从文件名中提取可能的用户编号（纯数字）
+        Pattern userCodePattern = Pattern.compile("\\b\\d{2,}\\b");
+        matcher = userCodePattern.matcher(fileName);
+        if (matcher.find()) {
+            entity.setUserCode(matcher.group());
+        }
+
+        // 尝试从文件名中提取时间戳（14位数字）
+        Pattern timestampPattern = Pattern.compile("\\b\\d{14}\\b");
+        matcher = timestampPattern.matcher(fileName);
+        if (matcher.find()) {
+            String timestampStr = matcher.group();
+            Date shootTime = parseTimestamp(timestampStr);
+            if (shootTime != null) {
+                entity.setShootTime(shootTime);
+            }
+        }
+
+        log.info("使用备用方法提取信息: fileName={}, userCode={}, deviceId={}",
+            fileName, entity.getUserCode(), entity.getDeviceId());
+    }
+
+    /**
+     * 解析时间戳字符串为Date对象
+     * 支持格式: yyyyMMddHHmmss (如20250802160820)
+     *
+     * @param timestampStr 时间戳字符串
+     * @return Date对象，解析失败返回null
+     */
+    private Date parseTimestamp(String timestampStr) {
+        if (timestampStr == null || timestampStr.length() != 14) {
+            log.warn("时间戳格式不正确，应为14位数字: {}", timestampStr);
+            return null;
+        }
+
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss");
+            sdf.setLenient(false); // 严格解析模式
+            return sdf.parse(timestampStr);
+        } catch (ParseException e) {
+            log.warn("时间戳解析失败: {}", timestampStr, e);
+
+            // 尝试其他可能的格式
+            try {
+                if (timestampStr.length() == 12) {
+                    SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmm");
+                    return sdf.parse(timestampStr);
+                } else if (timestampStr.length() == 8) {
+                    SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd");
+                    return sdf.parse(timestampStr);
+                }
+            } catch (ParseException ex) {
+                log.warn("备选时间戳格式也解析失败: {}", timestampStr);
+            }
+
+            return null;
+        }
     }
 
     /**
@@ -996,7 +1139,7 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
             }
         }
 
-        return "userName"; // 默认值
+        return "unknown"; // 默认值
     }
 
     /**

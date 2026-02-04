@@ -60,3 +60,9 @@ ALTER TABLE camera_management
 -- 添加索引优化查询
 CREATE INDEX idx_camera_has_violation ON camera_management (has_violation);
 CREATE INDEX idx_camera_check_time ON camera_management (check_time);
+
+-- 添加单位编号,把dept_id字段改为部门id
+ALTER TABLE `ry-cloud`.`camera_management`
+    ADD COLUMN `unit_number` int NULL COMMENT '单位编号' AFTER `user_code`,
+MODIFY COLUMN `shoot_time` datetime NULL DEFAULT NULL COMMENT '拍摄时间（视频实际拍摄时间）' AFTER `user_name`,
+MODIFY COLUMN `dept_id` int NOT NULL DEFAULT 103 COMMENT '部门id' AFTER `upload_time`;
