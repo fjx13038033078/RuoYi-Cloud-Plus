@@ -12,6 +12,8 @@ import org.dromara.camera.domain.bo.CameraManagementBo;
 import org.dromara.camera.domain.vo.CameraImportExcelVo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.camera.service.ICameraManagementService;
+import org.dromara.camera.service.IVideoAnalysisService;
+import org.dromara.camera.service.IVideoScanUploadService;
 import org.dromara.common.core.domain.R;
 import org.dromara.common.core.validate.AddGroup;
 import org.dromara.common.core.validate.EditGroup;
@@ -46,6 +48,8 @@ import java.util.Map;
 public class CameraManagementController extends BaseController {
 
     private final ICameraManagementService cameraManagementService;
+    private final IVideoScanUploadService videoScanUploadService;
+    private final IVideoAnalysisService videoAnalysisService;
 
     /**
      * 查询执法视频信息管理列表
@@ -75,7 +79,7 @@ public class CameraManagementController extends BaseController {
     @PostMapping("/scanInsert")
     public R<List<CameraManagement>> scanInsert(@RequestParam("folderPath") String folderPath) {
         try {
-            List<CameraManagement> results = cameraManagementService.scanInsertFromFolder(folderPath);
+            List<CameraManagement> results = videoScanUploadService.scanInsertFromFolder(folderPath);
             return R.ok(results);
         } catch (Exception e) {
             return R.fail("扫描导入失败: " + e.getMessage());
@@ -156,7 +160,7 @@ public class CameraManagementController extends BaseController {
     @PostMapping("/upload")
     public R<Map<String, Object>> uploadVideo(@RequestParam("file") MultipartFile file) {
         try {
-            Map<String, Object> result = cameraManagementService.analyzeVideo(file);
+            Map<String, Object> result = videoAnalysisService.analyzeVideo(file);
             return R.ok("视频分析成功", result);
         } catch (IllegalArgumentException e) {
             return R.fail(e.getMessage());
