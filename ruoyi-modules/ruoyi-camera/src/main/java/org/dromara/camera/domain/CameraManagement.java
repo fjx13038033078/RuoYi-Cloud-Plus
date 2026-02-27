@@ -46,12 +46,17 @@ public class CameraManagement extends TenantEntity {
     private String userName;
 
     /**
+     * 单位编号
+     */
+    private String unitNumber;
+
+    /**
      * 上传时间（入库时间戳）
      */
     private Date uploadTime;
 
     /**
-     * 单位编号
+     * 部门id
      */
     private Long deptId;
 
