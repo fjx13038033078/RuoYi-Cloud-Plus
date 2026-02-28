@@ -1,5 +1,6 @@
 package org.dromara.camera.domain;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -46,8 +47,9 @@ public class CameraManagement extends TenantEntity {
     private String userName;
 
     /**
-     * 单位编号
+     * 单位编号（数据库暂无此列，标记为非数据库字段）
      */
+    @TableField(exist = false)
     private String unitNumber;
 
     /**
