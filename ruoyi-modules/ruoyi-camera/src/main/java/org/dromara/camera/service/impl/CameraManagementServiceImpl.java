@@ -67,6 +67,7 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
     private LambdaQueryWrapper<CameraManagement> buildQueryWrapper(CameraManagementBo bo) {
         LambdaQueryWrapper<CameraManagement> lqw = Wrappers.lambdaQuery();
         lqw.orderByAsc(CameraManagement::getVideoId);
+        lqw.like(StringUtils.isNotBlank(bo.getSerialNumber()), CameraManagement::getSerialNumber, bo.getSerialNumber());
         lqw.eq(StringUtils.isNotBlank(bo.getDeviceId()), CameraManagement::getDeviceId, bo.getDeviceId());
         lqw.eq(StringUtils.isNotBlank(bo.getUserCode()), CameraManagement::getUserCode, bo.getUserCode());
         lqw.like(StringUtils.isNotBlank(bo.getUserName()), CameraManagement::getUserName, bo.getUserName());

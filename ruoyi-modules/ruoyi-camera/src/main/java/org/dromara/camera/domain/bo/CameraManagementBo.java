@@ -30,6 +30,11 @@ public class CameraManagementBo extends BaseEntity {
     private Long videoId;
 
     /**
+     * 视频唯一序列号（从文件名解析，如 Q541062）
+     */
+    private String serialNumber;
+
+    /**
      * 来源设备
      */
     @NotBlank(message = "来源设备不能为空", groups = {AddGroup.class, EditGroup.class})

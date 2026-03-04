@@ -234,6 +234,30 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
                 entity.setUserName(VideoFileUtils.extractUserNameFromPath(path));
                 entity.setUploadTime(new Date());
                 entity.setDataSource("scan");
+
+                File file = new File(path);
+
+                // 从文件名解析序列号、用户编号、拍摄时间
+                VideoFileUtils.VideoFileNameInfo nameInfo = VideoFileUtils.parseVideoFileName(file.getName());
+                if (nameInfo.isParsed()) {
+                    entity.setSerialNumber(nameInfo.getSerialNumber());
+                    entity.setUserCode(nameInfo.getUserCode());
+                    entity.setShootTime(nameInfo.getShootTime());
+                    log.info("文件名解析成功：序列号={}, 用户编号={}, 拍摄时间={}",
+                        nameInfo.getSerialNumber(), nameInfo.getUserCode(), nameInfo.getShootTime());
+                } else {
+                    log.warn("文件名解析失败，将使用默认值：{}", file.getName());
+                }
+
+                // 读取视频文件时长
+                String duration = VideoFileUtils.getFormattedDuration(file);
+                if (duration != null) {
+                    entity.setDurationDisplay(duration);
+                    log.info("视频时长解析成功：{} -> {}", file.getName(), duration);
+                } else {
+                    log.warn("视频时长解析失败或不支持的格式：{}", file.getName());
+                }
+
                 return entity;
             })
             .orElseGet(() -> {

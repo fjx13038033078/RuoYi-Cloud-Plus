@@ -5,7 +5,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.dromara.common.core.exception.ServiceException;
-import org.dromara.common.core.utils.MapstructUtils;
 import org.dromara.common.core.utils.StringUtils;
 import org.dromara.common.json.utils.JsonUtils;
 import org.dromara.common.oss.core.OssClient;
@@ -91,6 +90,15 @@ public class RemoteFileServiceImpl implements RemoteFileService {
     @Override
     public List<RemoteFile> selectByIds(String ossIds){
         List<SysOssVo> sysOssVos = sysOssService.listByIds(StringUtils.splitTo(ossIds, Convert::toLong));
-        return MapstructUtils.convert(sysOssVos, RemoteFile.class);
+        return sysOssVos.stream().map(vo -> {
+            RemoteFile file = new RemoteFile();
+            file.setOssId(vo.getOssId());
+            file.setName(vo.getFileName());
+            file.setUrl(vo.getUrl());
+            file.setOriginalName(vo.getOriginalName());
+            file.setFileSuffix(vo.getFileSuffix());
+            file.setExt1(vo.getExt1());
+            return file;
+        }).toList();
     }
 }

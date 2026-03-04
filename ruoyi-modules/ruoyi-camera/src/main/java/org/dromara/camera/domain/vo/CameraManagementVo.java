@@ -35,6 +35,12 @@ public class CameraManagementVo implements Serializable {
     private Long videoId;
 
     /**
+     * 视频唯一序列号（从文件名解析，如 Q541062）
+     */
+    @ExcelProperty(value = "视频序列号")
+    private String serialNumber;
+
+    /**
      * 来源设备
      */
     @ExcelProperty(value = "来源设备")
