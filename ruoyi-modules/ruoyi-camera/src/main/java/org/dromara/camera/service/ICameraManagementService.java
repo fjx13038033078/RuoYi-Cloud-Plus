@@ -1,6 +1,7 @@
 package org.dromara.camera.service;
 
 import org.dromara.camera.domain.bo.CameraManagementBo;
+import org.dromara.camera.domain.bo.ManualReviewBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
@@ -74,4 +75,11 @@ public interface ICameraManagementService {
      * @return 预签名播放URL
      */
     String getVideoPlayUrl(Long videoId);
+
+    /**
+     * 提交人工复判结果
+     *
+     * @param bo 复判请求对象
+     */
+    void submitManualReview(ManualReviewBo bo);
 }

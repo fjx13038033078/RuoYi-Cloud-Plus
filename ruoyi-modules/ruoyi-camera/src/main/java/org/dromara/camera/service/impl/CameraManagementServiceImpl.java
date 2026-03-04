@@ -9,12 +9,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.dromara.camera.domain.CameraManagement;
 import org.dromara.camera.domain.bo.CameraManagementBo;
+import org.dromara.camera.domain.bo.ManualReviewBo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.camera.mapper.CameraManagementMapper;
 import org.dromara.camera.service.ICameraManagementService;
 import org.dromara.common.core.exception.ServiceException;
 import org.dromara.common.core.utils.MapstructUtils;
 import org.dromara.common.core.utils.StringUtils;
+import org.dromara.common.satoken.utils.LoginHelper;
 import org.dromara.common.mybatis.core.page.PageQuery;
 import org.dromara.common.mybatis.core.page.TableDataInfo;
 import org.dromara.common.oss.core.OssClient;
@@ -23,8 +25,11 @@ import org.dromara.resource.api.RemoteFileService;
 import org.dromara.resource.api.domain.RemoteFile;
 import org.springframework.stereotype.Service;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import java.time.Duration;
 import java.util.Collection;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -150,5 +155,31 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
             log.error("生成视频播放URL失败，videoId: {}, url: {}", videoId, originalUrl, e);
             throw new ServiceException("生成视频播放URL失败: " + e.getMessage());
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void submitManualReview(ManualReviewBo bo) {
+        CameraManagement camera = baseMapper.selectById(bo.getVideoId());
+        if (camera == null) {
+            throw new ServiceException("视频记录不存在");
+        }
+
+        CameraManagement update = new CameraManagement();
+        update.setVideoId(bo.getVideoId());
+        update.setReviewStatus(1);
+        update.setReviewResult(bo.getReviewResult());
+        update.setReviewComment(bo.getReviewComment());
+        update.setReviewerId(LoginHelper.getUserId());
+        update.setReviewTime(new Date());
+
+        if (bo.getReviewResult() == 0) {
+            update.setHasViolation(0);
+            update.setViolationType(null);
+        }
+
+        baseMapper.updateById(update);
+        log.info("人工复判完成: videoId={}, reviewResult={}, reviewerId={}",
+            bo.getVideoId(), bo.getReviewResult(), update.getReviewerId());
     }
 }

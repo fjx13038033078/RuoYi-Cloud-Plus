@@ -152,4 +152,29 @@ public class CameraManagement extends TenantEntity {
      * OSS文件ID（关联sys_oss表）
      */
     private Long ossId;
+
+    /**
+     * 复判状态（0未复判 1已复判）
+     */
+    private Integer reviewStatus;
+
+    /**
+     * 复判结果（0正常无违规 1确认违规）
+     */
+    private Integer reviewResult;
+
+    /**
+     * 复判说明
+     */
+    private String reviewComment;
+
+    /**
+     * 复判人ID
+     */
+    private Long reviewerId;
+
+    /**
+     * 复判时间
+     */
+    private Date reviewTime;
 }

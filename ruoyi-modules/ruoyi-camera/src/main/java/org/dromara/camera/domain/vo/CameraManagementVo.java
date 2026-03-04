@@ -171,4 +171,38 @@ public class CameraManagementVo implements Serializable {
     @Translation(type = TransConstant.OSS_ID_TO_URL, mapper = "ossId")
     private String url;
 
+    /**
+     * 复判状态（0未复判 1已复判）
+     */
+    @ExcelProperty(value = "复判状态")
+    private Integer reviewStatus;
+
+    /**
+     * 复判结果（0正常无违规 1确认违规）
+     */
+    @ExcelProperty(value = "复判结果")
+    private Integer reviewResult;
+
+    /**
+     * 复判说明
+     */
+    @ExcelProperty(value = "复判说明")
+    private String reviewComment;
+
+    /**
+     * 复判人ID
+     */
+    private Long reviewerId;
+
+    /**
+     * 复判人名称
+     */
+    @Translation(type = TransConstant.USER_ID_TO_NAME, mapper = "reviewerId")
+    private String reviewerName;
+
+    /**
+     * 复判时间
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date reviewTime;
 }

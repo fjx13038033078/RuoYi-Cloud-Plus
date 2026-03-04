@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.dromara.camera.domain.CameraManagement;
 import org.dromara.camera.domain.bo.CameraManagementBo;
+import org.dromara.camera.domain.bo.ManualReviewBo;
 import org.dromara.camera.domain.vo.CameraImportExcelVo;
 import org.dromara.camera.domain.vo.CameraManagementVo;
 import org.dromara.camera.service.ICameraManagementService;
@@ -181,5 +182,17 @@ public class CameraManagementController extends BaseController {
                                 @PathVariable("videoId") Long videoId) {
         String playUrl = cameraManagementService.getVideoPlayUrl(videoId);
         return R.ok("获取成功", playUrl);
+    }
+
+    /**
+     * 提交人工复判结果
+     */
+    @SaCheckPermission("camera:management:edit")
+    @Log(title = "执法视频人工复判", businessType = BusinessType.UPDATE)
+    @RepeatSubmit()
+    @PostMapping("/review")
+    public R<Void> submitReview(@Validated @RequestBody ManualReviewBo bo) {
+        cameraManagementService.submitManualReview(bo);
+        return R.ok("复判提交成功");
     }
 }
