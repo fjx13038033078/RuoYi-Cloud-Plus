@@ -50,12 +50,15 @@ public class VideoAiResultServiceImpl implements IVideoAiResultService {
             update.setAiCheckResult(wrapAsJson(result.getAiDescription()));
             update.setHasViolation(result.hasViolationBehavior() ? 1 : 0);
             update.setViolationType(result.getViolationType());
+            update.setViolationStartSecond(result.getViolationStartSecond());
+            update.setViolationEndSecond(result.getViolationEndSecond());
             update.setScreenshotUrl(result.getScreenshotUrl());
             update.setProcessTime(result.getProcessTime());
             update.setCheckTime(new Date());
 
-            log.info("AI检测完成: videoId={}, hasViolation={}, violationType={}",
-                videoId, result.getHasViolation(), result.getViolationType());
+            log.info("AI检测完成: videoId={}, hasViolation={}, violationType={}, violationTime={}-{}s",
+                videoId, result.getHasViolation(), result.getViolationType(),
+                result.getViolationStartSecond(), result.getViolationEndSecond());
         } else {
             update.setAiCheckStatus(3L);
             update.setAiCheckResult(wrapAsJson("检测失败: " + result.getErrorMessage()));

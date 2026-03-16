@@ -123,6 +123,16 @@ public class CameraManagement extends TenantEntity {
     private String violationType;
 
     /**
+     * 违规行为起始时间点（秒）
+     */
+    private Double violationStartSecond;
+
+    /**
+     * 违规行为结束时间点（秒）
+     */
+    private Double violationEndSecond;
+
+    /**
      * 违规截图URL
      */
     private String screenshotUrl;

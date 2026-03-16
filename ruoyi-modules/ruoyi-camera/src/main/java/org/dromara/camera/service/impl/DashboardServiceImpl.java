@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.dromara.camera.domain.CameraManagement;
 import org.dromara.camera.domain.vo.DashboardStatsVo;
 import org.dromara.camera.mapper.CameraManagementMapper;
+import org.dromara.camera.service.ICameraManagementService;
 import org.dromara.camera.service.IDashboardService;
 import org.dromara.common.core.utils.StringUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,6 +31,7 @@ public class DashboardServiceImpl implements IDashboardService {
 
     private final CameraManagementMapper baseMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final ICameraManagementService cameraManagementService;
 
     private static final Map<Integer, String> STATUS_TEXT_MAP = Map.of(
         0, "未检测", 1, "检测中", 2, "检测完成", 3, "检测失败"
@@ -49,6 +51,8 @@ public class DashboardServiceImpl implements IDashboardService {
         vo.setDeptStats(buildDeptStats());
         // 最新记录
         vo.setRecentRecords(buildRecentRecords());
+        // 最近4条违规视频
+        vo.setRecentViolationVideos(buildRecentViolationVideos());
 
         return vo;
     }
@@ -245,5 +249,34 @@ public class DashboardServiceImpl implements IDashboardService {
             return minutes + "m" + seconds + "s";
         }
         return seconds + "s";
+    }
+
+    private List<DashboardStatsVo.ViolationVideoItem> buildRecentViolationVideos() {
+        List<CameraManagement> violations = baseMapper.selectList(
+            Wrappers.<CameraManagement>lambdaQuery()
+                .eq(CameraManagement::getHasViolation, 1)
+                .orderByDesc(CameraManagement::getUploadTime)
+                .last("LIMIT 4"));
+
+        List<DashboardStatsVo.ViolationVideoItem> result = new ArrayList<>();
+        for (CameraManagement c : violations) {
+            DashboardStatsVo.ViolationVideoItem item = new DashboardStatsVo.ViolationVideoItem();
+            item.setVideoId(c.getVideoId());
+            item.setViolationStartSecond(c.getViolationStartSecond());
+            item.setViolationEndSecond(c.getViolationEndSecond());
+            item.setViolationType(c.getViolationType());
+            String path = c.getStorageLocation();
+            item.setFileName(path != null && path.contains("/")
+                ? path.substring(path.lastIndexOf("/") + 1) : path);
+            try {
+                String playUrl = cameraManagementService.getVideoPlayUrl(c.getVideoId());
+                item.setPlayUrl(playUrl);
+            } catch (Exception e) {
+                log.warn("获取违规视频播放URL失败 videoId={}: {}", c.getVideoId(), e.getMessage());
+                continue;
+            }
+            result.add(item);
+        }
+        return result;
     }
 }

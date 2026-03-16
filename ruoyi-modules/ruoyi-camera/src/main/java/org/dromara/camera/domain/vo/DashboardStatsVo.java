@@ -40,6 +40,8 @@ public class DashboardStatsVo implements Serializable {
     private List<DeptItem> deptStats;
     /** 最新检测记录 */
     private List<RecordItem> recentRecords;
+    /** 最近4条违规视频（用于首页四宫格展示） */
+    private List<ViolationVideoItem> recentViolationVideos;
 
     @Data
     public static class TrendItem implements Serializable {
@@ -79,5 +81,17 @@ public class DashboardStatsVo implements Serializable {
         private String userName;
         private Integer hasViolation;
         private String resultText;
+    }
+
+    @Data
+    public static class ViolationVideoItem implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+        private Long videoId;
+        private String playUrl;
+        private Double violationStartSecond;
+        private Double violationEndSecond;
+        private String violationType;
+        private String fileName;
     }
 }
