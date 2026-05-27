@@ -46,8 +46,10 @@ VALUES (1881234567892001, '000000', 1, '执法记录仪自动上传', 'auto', 'c
         NOW(), ''),
        (1881234567892003, '000000', 3, '外部导入', 'import', 'camera_data_source', '', 'info', 'N', 100, 1, NOW(), 1,
         NOW(), ''),
-       (1881234567892004, '000000', 4, '文件夹扫描', 'scan', 'camera_data_source', '', 'warning', 'Y', 100, 1, NOW(), 1,
-        NOW(), '');
+       (1881234567892004, '000000', 4, 'AI检测扫描', 'scan', 'camera_data_source', '', 'warning', 'Y', 100, 1, NOW(), 1,
+        NOW(), 'SnailJob定时扫描并触发AI检测'),
+       (1881234567892005, '000000', 5, '视频切割扫描', 'clip', 'camera_data_source', '', 'success', 'N', 100, 1, NOW(), 1,
+        NOW(), 'SnailJob定时扫描并发起视频切割');
 
 -- 为 camera_management 表添加违规相关字段
 ALTER TABLE camera_management
