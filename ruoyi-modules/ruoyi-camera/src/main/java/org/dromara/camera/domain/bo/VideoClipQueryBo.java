@@ -14,6 +14,9 @@ public class VideoClipQueryBo extends BaseEntity {
     /** 关联视频ID */
     private Long videoId;
 
+    /** 原视频文件名（模糊查询） */
+    private String sourceFileName;
+
     /** 切割任务ID */
     private String taskId;
 

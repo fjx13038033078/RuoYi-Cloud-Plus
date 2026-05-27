@@ -32,6 +32,12 @@ public class VideoClip extends TenantEntity {
     /** 关联执法视频ID */
     private Long videoId;
 
+    /** 原视频文件名 */
+    private String sourceFileName;
+
+    /** 原视频切分出的有效片段总数 */
+    private Integer sourceClipCount;
+
     /** 切片序号（从0开始） */
     private Integer clipIndex;
 

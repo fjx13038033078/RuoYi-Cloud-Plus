@@ -36,6 +36,14 @@ public class VideoClipVo implements Serializable {
     @ExcelProperty("视频ID")
     private Long videoId;
 
+    /** 原视频文件名 */
+    @ExcelProperty("原视频文件名")
+    private String sourceFileName;
+
+    /** 原视频切分出的有效片段总数 */
+    @ExcelProperty("切片总数")
+    private Integer sourceClipCount;
+
     /** 切片序号 */
     @ExcelProperty("序号")
     private Integer clipIndex;

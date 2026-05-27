@@ -54,6 +54,18 @@ public final class VideoFileUtils {
     }
 
     /**
+     * 从文件路径中提取文件名（兼容 Windows UNC 与 Unix 路径）
+     */
+    public static String extractFileNameFromPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        String normalized = normalizePath(path);
+        int idx = normalized.lastIndexOf('/');
+        return idx >= 0 ? normalized.substring(idx + 1) : normalized;
+    }
+
+    /**
      * 探测文件 Content-Type，优先按扩展名匹配，否则使用系统探测
      */
     public static String detectContentType(File file) {

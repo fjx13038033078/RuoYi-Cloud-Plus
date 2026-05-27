@@ -97,9 +97,12 @@ public class VideoClipServiceImpl implements IVideoClipService {
     private LambdaQueryWrapper<VideoClip> buildQueryWrapper(VideoClipQueryBo bo) {
         LambdaQueryWrapper<VideoClip> lqw = Wrappers.lambdaQuery();
         lqw.eq(bo.getVideoId() != null, VideoClip::getVideoId, bo.getVideoId());
+        lqw.like(StringUtils.isNotBlank(bo.getSourceFileName()), VideoClip::getSourceFileName, bo.getSourceFileName());
         lqw.eq(StringUtils.isNotBlank(bo.getTaskId()), VideoClip::getTaskId, bo.getTaskId());
         lqw.eq(bo.getClipStatus() != null, VideoClip::getClipStatus, bo.getClipStatus());
-        lqw.orderByAsc(VideoClip::getVideoId).orderByAsc(VideoClip::getClipIndex);
+        lqw.orderByDesc(VideoClip::getCreateTime)
+            .orderByAsc(VideoClip::getSourceFileName)
+            .orderByAsc(VideoClip::getClipIndex);
         return lqw;
     }
 }
