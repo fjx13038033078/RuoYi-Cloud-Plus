@@ -106,6 +106,16 @@ spring:
     port: 5672
     username: ruoyi
     password: ruoyi123
+    # 视频切割任务队列（Java -> Python）
+    video-clip:
+      queue: video.clip.queue
+      exchange: video.clip.exchange
+      routing-key: video.clip.task
+    # 视频切割结果队列（Python -> Java）
+    video-clip-result:
+      queue: video.clip.result.queue
+      exchange: video.clip.result.exchange
+      routing-key: video.clip.result.finish
 
   # redis通用配置 子服务可以自行配置进行覆盖
   data:

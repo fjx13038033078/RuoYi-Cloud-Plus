@@ -13,11 +13,19 @@ import java.util.List;
 public interface IVideoScanUploadService {
 
     /**
-     * 扫描指定文件夹下的视频文件并导入到数据库
-     * 采用"先上传后保存"策略，确保只有上传成功的文件才会写入数据库
+     * 扫描指定文件夹下的视频文件并导入到数据库（默认触发 AI 识别）
      *
      * @param folderPath 要扫描的文件夹路径
      * @return 成功导入的 CameraManagement 实体列表
      */
     List<CameraManagement> scanInsertFromFolder(String folderPath);
+
+    /**
+     * 扫描指定文件夹下的视频文件并导入到数据库
+     *
+     * @param folderPath         要扫描的文件夹路径
+     * @param triggerAiAnalysis  入库后是否发送 AI 检测消息（false 用于切割定时任务等场景）
+     * @return 成功导入的 CameraManagement 实体列表
+     */
+    List<CameraManagement> scanInsertFromFolder(String folderPath, boolean triggerAiAnalysis);
 }

@@ -60,8 +60,13 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
 
     @Override
     public List<CameraManagement> scanInsertFromFolder(String folderPath) {
+        return scanInsertFromFolder(folderPath, true);
+    }
+
+    @Override
+    public List<CameraManagement> scanInsertFromFolder(String folderPath, boolean triggerAiAnalysis) {
         Validate.notBlank(folderPath, "文件夹路径不能为空");
-        log.info("开始扫描文件夹: {}", folderPath);
+        log.info("开始扫描文件夹: {}, triggerAiAnalysis={}", folderPath, triggerAiAnalysis);
 
         try {
             List<String> allVideoPaths = scanVideoFiles(folderPath);
@@ -91,7 +96,7 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
             List<CameraManagement> successEntities = new ArrayList<>();
             for (String filePath : newFilePaths) {
                 try {
-                    CameraManagement result = processAndUploadSingleVideo(filePath);
+                    CameraManagement result = processAndUploadSingleVideo(filePath, triggerAiAnalysis);
                     if (result != null) {
                         successEntities.add(result);
                     }
@@ -125,6 +130,11 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
 
     @Transactional(rollbackFor = Exception.class)
     public CameraManagement processAndUploadSingleVideo(String filePath) {
+        return processAndUploadSingleVideo(filePath, true);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public CameraManagement processAndUploadSingleVideo(String filePath, boolean triggerAiAnalysis) {
         if (isPathExistsInDatabase(filePath)) {
             log.info("文件已存在于数据库中，跳过：{}", filePath);
             return null;
@@ -184,7 +194,11 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
                 log.info("文件处理成功：{}，OSS ID：{}，文件大小：{} MB",
                     sourceFile.getName(), ossId, String.format("%.2f", sourceFile.length() / (1024.0 * 1024.0)));
 
-                sendUploadSuccessMessage(entity, uploadResult, sourceFile, currentClient);
+                if (triggerAiAnalysis) {
+                    sendUploadSuccessMessage(entity, uploadResult, sourceFile, currentClient);
+                } else {
+                    log.info("已跳过 AI 检测 MQ：videoId={}（triggerAiAnalysis=false）", entity.getVideoId());
+                }
 
                 return entity;
 

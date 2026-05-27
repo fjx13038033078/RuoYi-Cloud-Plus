@@ -38,6 +38,26 @@ public class VideoMqConfig {
     @Value("${spring.rabbitmq.video-result.routing-key:video.result.finish}")
     private String videoResultRoutingKey;
 
+    // 切割任务队列配置（发给 Python）
+    @Value("${spring.rabbitmq.video-clip.queue:video.clip.queue}")
+    private String videoClipQueue;
+
+    @Value("${spring.rabbitmq.video-clip.exchange:video.clip.exchange}")
+    private String videoClipExchange;
+
+    @Value("${spring.rabbitmq.video-clip.routing-key:video.clip.task}")
+    private String videoClipRoutingKey;
+
+    // 切割结果队列配置（接收Python回传的切割结果）
+    @Value("${spring.rabbitmq.video-clip-result.queue:video.clip.result.queue}")
+    private String videoClipResultQueue;
+
+    @Value("${spring.rabbitmq.video-clip-result.exchange:video.clip.result.exchange}")
+    private String videoClipResultExchange;
+
+    @Value("${spring.rabbitmq.video-clip-result.routing-key:video.clip.result.finish}")
+    private String videoClipResultRoutingKey;
+
     public VideoMqConfig(
         @Value("${spring.rabbitmq.video-upload.queue}") String videoUploadQueue,
         @Value("${spring.rabbitmq.video-upload.exchange}") String videoUploadExchange,
@@ -123,6 +143,58 @@ public class VideoMqConfig {
             .bind(videoResultQueue())
             .to(videoResultExchange())
             .with(videoResultRoutingKey);
+    }
+
+    // ==================== 切割任务队列配置（发给 Python） ====================
+
+    /** 切割任务队列 */
+    @Bean
+    public Queue videoClipQueue() {
+        return QueueBuilder.durable(videoClipQueue)
+            .withArgument("x-dead-letter-exchange", "")
+            .withArgument("x-dead-letter-routing-key", videoClipQueue + ".dlq")
+            .withArgument("x-max-length", 1000)
+            .build();
+    }
+
+    /** 切割任务死信队列 */
+    @Bean
+    public Queue videoClipDlqQueue() {
+        return QueueBuilder.durable(videoClipQueue + ".dlq").build();
+    }
+
+    /** 切割任务交换机 */
+    @Bean
+    public TopicExchange videoClipExchange() {
+        return ExchangeBuilder.topicExchange(videoClipExchange).durable(true).build();
+    }
+
+    /** 绑定切割任务队列 */
+    @Bean
+    public Binding videoClipBinding() {
+        return BindingBuilder.bind(videoClipQueue()).to(videoClipExchange()).with(videoClipRoutingKey);
+    }
+
+    // ==================== 切割结果队列配置（接收 Python 回传） ====================
+
+    /** 切割结果队列 */
+    @Bean
+    public Queue videoClipResultQueue() {
+        return QueueBuilder.durable(videoClipResultQueue)
+            .withArgument("x-max-length", 10000)
+            .build();
+    }
+
+    /** 切割结果交换机 */
+    @Bean
+    public TopicExchange videoClipResultExchange() {
+        return ExchangeBuilder.topicExchange(videoClipResultExchange).durable(true).build();
+    }
+
+    /** 绑定切割结果队列 */
+    @Bean
+    public Binding videoClipResultBinding() {
+        return BindingBuilder.bind(videoClipResultQueue()).to(videoClipResultExchange()).with(videoClipResultRoutingKey);
     }
 
     /**
