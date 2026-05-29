@@ -113,6 +113,11 @@ public class CameraManagement extends TenantEntity {
     private String aiCheckResult;
 
     /**
+     * AI检测事件列表JSON（含每个违规事件对应的相关规章制度）
+     */
+    private String eventsJson;
+
+    /**
      * 是否有违规行为（0:否,1:是）
      */
     private Integer hasViolation;

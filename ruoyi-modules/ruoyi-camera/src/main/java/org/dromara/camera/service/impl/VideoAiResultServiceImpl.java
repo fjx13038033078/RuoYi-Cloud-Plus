@@ -48,6 +48,7 @@ public class VideoAiResultServiceImpl implements IVideoAiResultService {
         if (result.isSuccess()) {
             update.setAiCheckStatus(2L);
             update.setAiCheckResult(wrapAsJson(result.getAiDescription()));
+            update.setEventsJson(result.getEventsJson());
             update.setHasViolation(result.hasViolationBehavior() ? 1 : 0);
             update.setViolationType(result.getViolationType());
             update.setViolationStartSecond(result.getViolationStartSecond());
