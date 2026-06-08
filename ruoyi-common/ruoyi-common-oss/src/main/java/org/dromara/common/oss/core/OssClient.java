@@ -94,7 +94,16 @@ public class OssClient {
                 .region(of())
                 .forcePathStyle(isStyle)
                 .httpClient(NettyNioAsyncHttpClient.builder()
-                    .connectionTimeout(Duration.ofSeconds(60)).build())
+                    .connectionTimeout(Duration.ofSeconds(60))
+                    // 最大并发连接数（默认仅 50）。批量上传 + 大文件分片并行时易被打满，调大避免连接池耗尽
+                    .maxConcurrency(200)
+                    // 等待空闲连接的排队上限，配合大批量任务
+                    .maxPendingConnectionAcquires(10000)
+                    // 获取连接的超时时间（默认 10s，正是 "Acquire operation took longer than 10000ms" 的来源），适当放宽
+                    .connectionAcquisitionTimeout(Duration.ofSeconds(60))
+                    // 空闲连接保活/回收，避免占用过期连接
+                    .connectionMaxIdleTime(Duration.ofSeconds(60))
+                    .build())
                 .build();
 
             //AWS基于 CRT 的 S3 AsyncClient 实例用作 S3 传输管理器的底层客户端
