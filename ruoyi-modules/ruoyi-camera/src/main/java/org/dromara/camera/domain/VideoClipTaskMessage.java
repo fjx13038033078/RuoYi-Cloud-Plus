@@ -28,7 +28,7 @@ public class VideoClipTaskMessage implements Serializable {
     /** 视频ID */
     private Long videoId;
 
-    /** 预签名下载URL（24h有效） */
+    /** 预签名下载URL（7天有效） */
     private String presignedUrl;
 
     /** 最短有效片段时长（秒），默认 3.0 */

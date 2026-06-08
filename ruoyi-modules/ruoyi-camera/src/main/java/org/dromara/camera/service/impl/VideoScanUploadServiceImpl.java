@@ -53,7 +53,7 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
     private final JdbcTemplate jdbcTemplate;
     private final IVideoMessageService videoMessageService;
 
-    private static final Duration PRESIGNED_URL_EXPIRATION = Duration.ofHours(24);
+    private static final Duration PRESIGNED_URL_EXPIRATION = Duration.ofDays(7);
 
     private static final Pattern VIDEO_PATTERN = Pattern.compile(
         "\\.(mp4|avi|mov|wmv|flv|mkv|mpeg|mpg|webm|3gp)$", Pattern.CASE_INSENSITIVE);
@@ -351,7 +351,7 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
             String presignedUrl = ossClient.getPrivateUrl(objectName, PRESIGNED_URL_EXPIRATION);
             videoMessageService.sendVideoDetectionMessage(
                 videoId, presignedUrl, bucketName, objectName, originalUrl, metadata);
-            log.info("已发送视频检测消息到RabbitMQ: videoId={}, presignedUrl有效期=24小时", videoId);
+            log.info("已发送视频检测消息到RabbitMQ: videoId={}, presignedUrl有效期=7天", videoId);
         } catch (Exception e) {
             log.error("发送RabbitMQ消息失败，但文件上传已成功: videoId={}", videoId, e);
         }

@@ -36,7 +36,7 @@ public class VideoUploadMessage implements Serializable {
     private Long videoId;
 
     /**
-     * 预签名URL（核心字段：算法端下载视频的凭证，24小时有效）
+     * 预签名URL（核心字段：算法端下载视频的凭证，7天有效）
      */
     private String presignedUrl;
 

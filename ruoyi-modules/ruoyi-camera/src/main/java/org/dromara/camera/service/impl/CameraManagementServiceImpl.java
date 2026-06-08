@@ -49,7 +49,7 @@ public class CameraManagementServiceImpl implements ICameraManagementService {
     @DubboReference
     private RemoteFileService remoteFileService;
 
-    private static final Duration VIDEO_PLAY_URL_EXPIRATION = Duration.ofHours(24);
+    private static final Duration VIDEO_PLAY_URL_EXPIRATION = Duration.ofDays(7);
 
     @Override
     public CameraManagementVo queryById(Long videoId) {

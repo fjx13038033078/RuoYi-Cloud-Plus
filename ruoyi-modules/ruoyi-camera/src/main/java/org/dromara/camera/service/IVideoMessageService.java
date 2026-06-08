@@ -21,7 +21,7 @@ public interface IVideoMessageService {
      * 构建并发送视频检测消息
      *
      * @param videoId       数据库主键ID
-     * @param presignedUrl  预签名URL（24小时有效）
+     * @param presignedUrl  预签名URL（7天有效）
      * @param bucketName    存储桶名称
      * @param objectName    对象名称
      * @param originalUrl   原始URL

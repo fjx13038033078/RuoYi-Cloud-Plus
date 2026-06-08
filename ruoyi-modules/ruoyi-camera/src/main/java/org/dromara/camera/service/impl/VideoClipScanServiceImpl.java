@@ -31,7 +31,7 @@ public class VideoClipScanServiceImpl implements IVideoClipScanService {
     /** 切割任务定时扫描使用的数据来源标签，对应字典 camera_data_source */
     private static final String DATA_SOURCE_CLIP = "clip";
 
-    private static final Duration PRESIGN_DURATION = Duration.ofHours(24);
+    private static final Duration PRESIGN_DURATION = Duration.ofDays(7);
 
     private final IVideoScanUploadService videoScanUploadService;
     private final IVideoClipMessageService videoClipMessageService;

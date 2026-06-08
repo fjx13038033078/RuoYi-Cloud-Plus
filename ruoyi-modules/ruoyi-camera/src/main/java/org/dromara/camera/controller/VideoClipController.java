@@ -47,7 +47,7 @@ public class VideoClipController extends BaseController {
     @DubboReference
     private RemoteFileService remoteFileService;
 
-    private static final Duration PRESIGN_DURATION = Duration.ofHours(24);
+    private static final Duration PRESIGN_DURATION = Duration.ofDays(7);
 
     /**
      * 分页查询切片列表

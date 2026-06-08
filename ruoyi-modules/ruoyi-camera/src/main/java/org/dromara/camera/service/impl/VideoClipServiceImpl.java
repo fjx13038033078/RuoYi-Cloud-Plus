@@ -33,7 +33,7 @@ public class VideoClipServiceImpl implements IVideoClipService {
 
     private final VideoClipMapper baseMapper;
 
-    private static final Duration CLIP_URL_EXPIRATION = Duration.ofHours(24);
+    private static final Duration CLIP_URL_EXPIRATION = Duration.ofDays(7);
 
     @Override
     public TableDataInfo<VideoClipVo> queryPageList(VideoClipQueryBo bo, PageQuery pageQuery) {
