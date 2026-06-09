@@ -2,7 +2,6 @@ package org.dromara.camera.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +17,8 @@ import org.dromara.common.json.utils.JsonUtils;
 import org.dromara.common.oss.core.OssClient;
 import org.dromara.common.oss.entity.UploadResult;
 import org.dromara.common.oss.factory.OssFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.dromara.resource.api.RemoteFileService;
+import org.dromara.resource.api.domain.RemoteFile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -50,8 +50,8 @@ import static org.springframework.web.util.UriUtils.extractFileExtension;
 public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
 
     private final CameraManagementMapper baseMapper;
-    private final JdbcTemplate jdbcTemplate;
     private final IVideoMessageService videoMessageService;
+    private final RemoteFileService remoteFileService;
 
     private static final Duration PRESIGNED_URL_EXPIRATION = Duration.ofDays(7);
 
@@ -283,7 +283,6 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
     private Long saveToSysOss(CameraManagement camera, OssClient ossClient,
                               File file, UploadResult uploadResult, String contentType) {
         try {
-            Long ossId = IdWorker.getId();
             Map<String, Object> extMap = Map.of(
                 "fileSize", file.length(),
                 "contentType", contentType,
@@ -291,25 +290,23 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
                 "uploadTime", new Date()
             );
 
-            String sql = "INSERT INTO sys_oss (oss_id, tenant_id, file_name, original_name, " +
-                "file_suffix, url, ext1, create_dept, create_time, create_by, " +
-                "update_time, update_by, service) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-
             String fileName = uploadResult.getFilename();
             fileName = fileName.contains("/") ? fileName.substring(fileName.lastIndexOf("/") + 1) : fileName;
-            Date now = new Date();
 
-            Object[] params = {
-                ossId, "000000", fileName, file.getName(),
+            RemoteFile remoteFile = remoteFileService.saveOssRecord(
+                fileName,
+                file.getName(),
                 VideoFileUtils.extractFileSuffixWithoutDot(file),
                 uploadResult.getUrl(),
-                JsonUtils.toJsonString(extMap),
-                VideoFileUtils.getCurrentDeptId(), now, VideoFileUtils.getCurrentUserId(),
-                now, VideoFileUtils.getCurrentUserId(), ossClient.getConfigKey()
-            };
+                ossClient.getConfigKey(),
+                JsonUtils.toJsonString(extMap)
+            );
 
-            int rows = jdbcTemplate.update(sql, params);
-            return rows > 0 ? ossId : null;
+            if (remoteFile == null || remoteFile.getOssId() == null) {
+                log.warn("saveOssRecord 返回为空（可能触发降级），文件：{}", file.getName());
+                return null;
+            }
+            return remoteFile.getOssId();
         } catch (Exception e) {
             log.error("保存OSS记录失败：{}", file.getName(), e);
             return null;

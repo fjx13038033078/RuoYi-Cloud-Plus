@@ -50,4 +50,14 @@ public class RemoteFileServiceMock implements RemoteFileService {
         return List.of();
     }
 
+    /**
+     * 保存 OSS 记录（降级处理）
+     */
+    @Override
+    public RemoteFile saveOssRecord(String fileName, String originalName, String fileSuffix,
+                                    String url, String service, String ext1) {
+        log.warn("服务调用异常 -> 降级处理 saveOssRecord");
+        return null;
+    }
+
 }

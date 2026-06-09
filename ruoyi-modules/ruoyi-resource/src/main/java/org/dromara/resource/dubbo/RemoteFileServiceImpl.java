@@ -82,6 +82,37 @@ public class RemoteFileServiceImpl implements RemoteFileService {
     }
 
     /**
+     * 保存已上传文件的 OSS 记录（不重新上传，仅写 sys_oss 表）
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RemoteFile saveOssRecord(String fileName, String originalName, String fileSuffix,
+                                    String url, String service, String ext1) {
+        try {
+            SysOssBo oss = new SysOssBo();
+            oss.setFileName(fileName);
+            oss.setOriginalName(originalName);
+            oss.setFileSuffix(fileSuffix);
+            oss.setUrl(url);
+            oss.setService(service);
+            oss.setExt1(ext1);
+            sysOssService.insertByBo(oss);
+
+            RemoteFile result = new RemoteFile();
+            result.setOssId(oss.getOssId());
+            result.setName(fileName);
+            result.setUrl(url);
+            result.setOriginalName(originalName);
+            result.setFileSuffix(fileSuffix);
+            result.setExt1(ext1);
+            return result;
+        } catch (Exception e) {
+            log.error("保存OSS记录失败: fileName={}", fileName, e);
+            throw new ServiceException("保存OSS记录失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 通过ossId查询列表
      *
      * @param ossIds ossId串逗号分隔
