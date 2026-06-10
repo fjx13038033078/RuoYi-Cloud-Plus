@@ -56,6 +56,16 @@ public class VideoUploadMessage implements Serializable {
     private String originalUrl;
 
     /**
+     * 切片ID（video_clip.clip_id，切片预处理链路时非空；整段视频直发时为 null）
+     */
+    private Long clipId;
+
+    /**
+     * 切片在原视频中的起始秒（Python 端据此将事件时间偏移回原视频时间轴）
+     */
+    private Double clipStartSecond;
+
+    /**
      * 消息创建时间
      */
     private LocalDateTime createTime;

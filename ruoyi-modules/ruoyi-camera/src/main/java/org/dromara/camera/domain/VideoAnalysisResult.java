@@ -34,6 +34,11 @@ public class VideoAnalysisResult implements Serializable {
     private Long videoId;
 
     /**
+     * 切片ID（video_clip.clip_id，切片预处理链路时非空；整段视频直发时为 null）
+     */
+    private Long clipId;
+
+    /**
      * 状态: SUCCESS/FAILED
      */
     private String status;

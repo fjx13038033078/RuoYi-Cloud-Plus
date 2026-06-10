@@ -7,9 +7,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.Validate;
 import org.dromara.camera.domain.CameraManagement;
-import org.dromara.camera.domain.VideoUploadMessage;
 import org.dromara.camera.mapper.CameraManagementMapper;
-import org.dromara.camera.service.IVideoMessageService;
+import org.dromara.camera.service.IVideoClipMessageService;
 import org.dromara.camera.service.IVideoScanUploadService;
 import org.dromara.camera.utils.VideoFileUtils;
 import org.dromara.common.core.utils.StringUtils;
@@ -50,7 +49,7 @@ import static org.springframework.web.util.UriUtils.extractFileExtension;
 public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
 
     private final CameraManagementMapper baseMapper;
-    private final IVideoMessageService videoMessageService;
+    private final IVideoClipMessageService videoClipMessageService;
     private final RemoteFileService remoteFileService;
 
     private static final Duration PRESIGNED_URL_EXPIRATION = Duration.ofDays(7);
@@ -183,6 +182,10 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
                     return null;
                 }
 
+                if (triggerAiAnalysis) {
+                    // 切分预处理链路：先置为检测中，待全部切片AI检测完成后聚合更新
+                    entity.setAiCheckStatus(1L);
+                }
                 baseMapper.insert(entity);
 
                 Long ossId = saveToSysOss(entity, currentClient, sourceFile, uploadResult, contentType);
@@ -195,9 +198,10 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
                     sourceFile.getName(), ossId, String.format("%.2f", sourceFile.length() / (1024.0 * 1024.0)));
 
                 if (triggerAiAnalysis) {
-                    sendUploadSuccessMessage(entity, uploadResult, sourceFile, currentClient);
+                    // 切分作为 AI 检测预处理：先发切割任务，切片落库后再逐片触发 AI 检测
+                    sendClipPreprocessTask(entity, uploadResult, currentClient);
                 } else {
-                    log.info("已跳过 AI 检测 MQ：videoId={}（triggerAiAnalysis=false）", entity.getVideoId());
+                    log.info("已跳过切割预处理 MQ：videoId={}（triggerAiAnalysis=false）", entity.getVideoId());
                 }
 
                 return entity;
@@ -313,44 +317,33 @@ public class VideoScanUploadServiceImpl implements IVideoScanUploadService {
         }
     }
 
-    private void sendUploadSuccessMessage(CameraManagement camera, UploadResult uploadResult,
-                                          File file, OssClient ossClient) {
+    /**
+     * 发送切割预处理任务（事务提交后执行）
+     * 切片结果由 VideoClipResultConsumer 落库并逐片触发 AI 检测
+     */
+    private void sendClipPreprocessTask(CameraManagement camera, UploadResult uploadResult, OssClient ossClient) {
         String originalUrl = uploadResult.getUrl();
         String objectName = ossClient.removeBaseUrl(originalUrl);
-        String bucketName = VideoFileUtils.extractBucketName(originalUrl);
-
-        VideoUploadMessage.Metadata metadata = VideoUploadMessage.Metadata.builder()
-            .videoCode(VideoFileUtils.extractVideoCode(file.getName()))
-            .userName(camera.getUserName())
-            .recordTime(camera.getShootTime() != null ? camera.getShootTime().toString() : null)
-            .fileName(file.getName())
-            .fileSize(file.length())
-            .contentType(VideoFileUtils.detectContentType(file))
-            .originalPath(file.getAbsolutePath())
-            .build();
 
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    doSendMessage(camera.getVideoId(), ossClient, objectName, bucketName, originalUrl, metadata);
+                    doSendClipTask(camera.getVideoId(), ossClient, objectName);
                 }
             });
         } else {
-            doSendMessage(camera.getVideoId(), ossClient, objectName, bucketName, originalUrl, metadata);
+            doSendClipTask(camera.getVideoId(), ossClient, objectName);
         }
     }
 
-    private void doSendMessage(Long videoId, OssClient ossClient, String objectName,
-                               String bucketName, String originalUrl,
-                               VideoUploadMessage.Metadata metadata) {
+    private void doSendClipTask(Long videoId, OssClient ossClient, String objectName) {
         try {
             String presignedUrl = ossClient.getPrivateUrl(objectName, PRESIGNED_URL_EXPIRATION);
-            videoMessageService.sendVideoDetectionMessage(
-                videoId, presignedUrl, bucketName, objectName, originalUrl, metadata);
-            log.info("已发送视频检测消息到RabbitMQ: videoId={}, presignedUrl有效期=7天", videoId);
+            String taskId = videoClipMessageService.sendClipTask(videoId, presignedUrl);
+            log.info("已发送切割预处理任务到RabbitMQ: videoId={}, taskId={}, presignedUrl有效期=7天", videoId, taskId);
         } catch (Exception e) {
-            log.error("发送RabbitMQ消息失败，但文件上传已成功: videoId={}", videoId, e);
+            log.error("发送切割预处理任务失败，但文件上传已成功: videoId={}", videoId, e);
         }
     }
 }

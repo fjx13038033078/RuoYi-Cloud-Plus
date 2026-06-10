@@ -86,6 +86,29 @@ public class VideoMessageServiceImpl implements IVideoMessageService {
         sendVideoUploadMessage(message);
     }
 
+    @Override
+    public void sendClipDetectionMessage(Long videoId, Long clipId, Double clipStartSecond,
+                                         String presignedUrl, String bucketName,
+                                         String objectName, String originalUrl,
+                                         VideoUploadMessage.Metadata metadata) {
+        String taskId = "VID-" + videoId + "-CLIP-" + clipId + "-" + System.currentTimeMillis();
+
+        VideoUploadMessage message = VideoUploadMessage.builder()
+            .taskId(taskId)
+            .videoId(videoId)
+            .clipId(clipId)
+            .clipStartSecond(clipStartSecond)
+            .presignedUrl(presignedUrl)
+            .bucketName(bucketName)
+            .objectName(objectName)
+            .originalUrl(originalUrl)
+            .createTime(LocalDateTime.now())
+            .metadata(metadata)
+            .build();
+
+        sendVideoUploadMessage(message);
+    }
+
     /**
      * 生成任务ID
      *
