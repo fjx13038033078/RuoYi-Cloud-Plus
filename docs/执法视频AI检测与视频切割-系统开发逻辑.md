@@ -29,12 +29,12 @@
 
 ## 1. 系统总览
 
-本系统围绕 **执法记录仪长视频** 提供两类异步 AI 能力：
+本系统围绕 **执法记录仪长视频** 提供两类异步 AI 能力。**视频切分作为 AI 检测的前置预处理**：扫描入库后先用 YOLO 切出「有人」短片段，再逐片送大模型检测，最后将各切片结果聚合写回原视频记录，从而避免对 20 分钟长视频直接跑大模型。
 
 | 能力 | 业务目标 | 触发方式 | 结果落库 |
 |------|----------|----------|----------|
-| **AI 违规检测** | 用大模型分析整段视频是否存在安全违规，生成报告与截图 | 扫描入库后自动发 MQ（`triggerAiAnalysis=true`） | `camera_management` |
-| **视频人体切割** | 用 YOLO 找出「有人」片段，FFmpeg 切成短视频上传 MinIO | SnailJob 定时扫描 + 发切割 MQ（**不触发 AI**） | `video_clip` |
+| **AI 违规检测（含切分预处理）** | 扫描入库 → 切分有人片段 → 逐片大模型检测 → 聚合报告与截图 | `cameraManagementJobExecutor` 扫描后自动串联（`triggerAiAnalysis=true`） | 切片级 `video_clip`，聚合后 `camera_management` |
+| **纯视频人体切割** | 仅用 YOLO 找出「有人」片段，FFmpeg 切成短视频上传 MinIO（**不触发 AI**） | `videoClipScanJobExecutor` 定时扫描 + 发切割 MQ | `video_clip` |
 
 ### 1.1 总体架构图
 
@@ -76,23 +76,24 @@ flowchart TB
     Job -->|Dubbo| Camera
     Camera -->|上传原视频| MinIO
     Camera -->|写记录| MySQL
-    Camera -->|AI任务| Q1
-    Camera -->|切割任务| Q3
-    Q1 --> MQConsumer --> Analyzer
-    Analyzer -->|结果| Q2
-    Q2 --> Camera
+    Camera -->|"切割任务（AI链路也先切割）"| Q3
     Q3 --> ClipConsumer --> Clipper
     Clipper -->|切片上传 clips/| MinIO
     Clipper -->|结果| Q4
     Q4 --> Camera
+    Camera -->|"scan链路：逐切片发AI任务<br/>(clipId + clipStartSecond)"| Q1
+    Q1 --> MQConsumer --> Analyzer
+    Analyzer -->|"结果（事件时间偏移回原视频）"| Q2
+    Q2 --> Camera
 ```
 
 ### 1.2 设计原则
 
 1. **异步解耦**：Java 负责业务编排与持久化，Python 负责重计算；两者通过 RabbitMQ JSON 消息通信。
-2. **预签名 URL 传视频**：Python 不直接访问 NAS 路径，而是通过 MinIO 24 小时预签名 URL 下载/流式读取视频。
-3. **事务后发 MQ**：原视频扫描入库在事务提交后再发送检测消息（`TransactionSynchronization.afterCommit`），避免脏读。
-4. **切割与 AI 隔离**：切割定时任务扫描时使用 `triggerAiAnalysis=false`，避免对尚未切分的 20 分钟长视频直接跑大模型。
+2. **预签名 URL 传视频**：Python 不直接访问 NAS 路径，而是通过 MinIO **7 天**预签名 URL 下载/流式读取视频。
+3. **事务后发 MQ**：原视频扫描入库、切片落库均在事务提交后再发送下游消息（`TransactionSynchronization.afterCommit`），避免脏读。
+4. **切分作为 AI 预处理**：AI 检测链路（`dataSource=scan`）扫描入库后**先发切割任务**，切片落库后自动逐片发 AI 任务，事件时间按 `clipStartSecond` 偏移回原视频时间轴，全部切片完成后聚合写回 `camera_management`。
+5. **双链路用 `dataSource` 区分**：`scan` → 切完自动逐片 AI；`clip`（纯切割定时任务）→ 切完即止，不触发 AI。
 
 ---
 
@@ -173,14 +174,24 @@ flowchart TB
 | **`source_clip_count`** | INT | **该次切割产出的有效片段总数** |
 | `clip_index` | INT | 片段序号，从 0 开始 |
 | `object_name` | VARCHAR | MinIO 对象路径，如 `clips/2026/05/27/clip_123_0_xxx.mp4` |
-| `url` | VARCHAR | 24h 预签名 URL（可过期，播放前会刷新） |
+| `url` | VARCHAR | 7 天预签名 URL（可过期，播放前会刷新） |
 | `start_second` / `end_second` / `duration_seconds` | DOUBLE | 片段时间信息 |
 | `file_size` | BIGINT | 字节 |
 | `clip_status` | TINYINT | 0 处理中 / 1 完成 / 2 失败 |
+| **`ai_check_status`** | TINYINT | **切片级 AI 状态：0 待检测 / 1 检测中 / 2 完成 / 3 失败** |
+| `ai_has_violation` | TINYINT | 切片是否违规（0 无 / 1 有） |
+| `ai_violation_type` | VARCHAR | 切片违规类型 |
+| `ai_description` | TEXT | 切片 AI 分析描述 |
+| `ai_events_json` | TEXT | 切片事件列表 JSON（时间已偏移到原视频时间轴） |
+| `ai_screenshot_url` | VARCHAR | 切片违规截图 URL |
+| `ai_violation_start_second` / `ai_violation_end_second` | DOUBLE | 切片违规起止秒（原视频时间轴） |
+| `ai_process_time` | DOUBLE | 切片 AI 处理耗时（秒） |
+| `ai_error_message` | VARCHAR | 切片 AI 检测失败信息 |
 
 **DDL：**
 - 建表：`script/sql/add_video_clip.sql`
 - 增量字段：`script/sql/update_video_clip_source_info.sql`
+- 切片级 AI 字段：`script/sql/add_video_clip_ai_fields.sql`
 
 **实体类：** `ruoyi-modules/ruoyi-camera/.../domain/VideoClip.java`
 
@@ -204,6 +215,8 @@ Java 端统一在 `VideoMqConfig.java` 声明 Exchange / Queue / Binding；Nacos
 | Python → Java（切割结果） | `video.clip.result.exchange` | `video.clip.result.queue` | `video.clip.result.finish` | Python `clip_result_publisher` | Java `VideoClipResultConsumer` |
 
 > **注意：** Python 消费侧绑定 routing key 使用通配符 `video.upload.#` / `video.clip.#`，与 Java 精确 key 兼容（Topic Exchange）。
+
+> **切分预处理扩展字段：** AI 任务消息 `VideoUploadMessage` 新增 `clipId`（切片 ID）与 `clipStartSecond`（切片在原视频中的起始秒）；AI 结果消息 `VideoAnalysisResult` 新增 `clipId`。`clipId` 为空表示整段视频直发（演示页/历史消息），非空表示切片级检测。
 
 ### 4.2 队列参数（与 Python 端必须一致）
 
@@ -251,12 +264,13 @@ public Queue videoClipQueue() {
 
 ### 5.1 业务目标
 
-对执法记录仪 **完整长视频** 进行 AI 分析：
-1. 识别是否存在矿山/作业安全违规行为
-2. 输出结构化事件 JSON（含起止时间、元数据）
-3. 二次安全合规审查（Thinking 模型）
-4. 违规时截取关键帧上传 MinIO
-5. 结果写回 `camera_management`，前端「检测记录」页展示
+对执法记录仪 **完整长视频** 进行「切分预处理 + 逐片 AI 分析 + 聚合」：
+1. 扫描入库后先发切割任务，YOLO 切出「有人」短片段（无人部分不进大模型，节省算力）
+2. 每个切片单独送视觉大模型，输出结构化事件 JSON（含起止时间、元数据）
+3. RAG 规章制度匹配 + Thinking 模型二次审查
+4. 违规时截取关键帧上传 MinIO（按切片内相对时间抓帧）
+5. 事件时间按 `clipStartSecond` 偏移回 **原视频时间轴**，切片级结果落 `video_clip`
+6. 该视频全部切片完成后聚合写回 `camera_management`，前端「检测记录」页展示
 
 ### 5.2 端到端时序
 
@@ -265,29 +279,44 @@ sequenceDiagram
     participant SJ as SnailJob<br/>cameraManagementJobExecutor
     participant Scan as VideoScanUploadServiceImpl
     participant MinIO as MinIO
-    participant DB as camera_management
-    participant MQ as video.upload.queue
-    participant Py as cameraAi mq_consumer
-    participant SA as stream_analyzer
+    participant DB as MySQL
+    participant CQ as video.clip.queue
+    participant PyClip as clip_mq_consumer<br/>+ video_clipper
+    participant CRQ as video.clip.result.queue
+    participant ClipCons as VideoClipResultConsumer
+    participant AQ as video.upload.queue
+    participant Py as mq_consumer<br/>+ stream_analyzer
     participant RMQ as video.result.queue
     participant Consumer as VideoResultConsumer
     participant UI as fileRecord 页面
 
     SJ->>Scan: scanInsertFromFolder(path)<br/>triggerAiAnalysis=true
     Scan->>MinIO: uploadSuffix 原视频
-    Scan->>DB: INSERT camera_management<br/>dataSource=scan
-    Scan->>MQ: VideoUploadMessage<br/>presignedUrl + metadata
-    MQ->>Py: 消费任务
-    Py->>SA: analyze_from_stream(task)
-    SA->>SA: YOLO辅助 + 视觉模型 + 安全审查
-    SA->>MinIO: 违规截图(可选)
-    Py->>RMQ: VideoAnalysisResultMessage
+    Scan->>DB: INSERT camera_management<br/>dataSource=scan, ai_check_status=1
+    Scan->>CQ: 切割任务（事务提交后）
+    CQ->>PyClip: YOLO切分 + FFmpeg + 上传clips/
+    PyClip->>CRQ: VideoClipResultMessage
+    CRQ->>ClipCons: handleClipResult
+    ClipCons->>DB: INSERT video_clip（ai_check_status=1）
+    alt 0 切片（无人）
+        ClipCons->>DB: camera_management 置完成、无违规
+    else N 切片
+        loop 每个切片
+            ClipCons->>AQ: VideoUploadMessage<br/>clipId + clipStartSecond + 切片预签名URL
+        end
+    end
+    AQ->>Py: analyze_from_stream(task)
+    Py->>Py: YOLO辅助 + 视觉模型 + RAG审查
+    Py->>MinIO: 违规截图(可选)
+    Py->>Py: 事件时间 + clipStartSecond 偏移
+    Py->>RMQ: VideoAnalysisResultMessage（含clipId）
     RMQ->>Consumer: handleVideoResult
-    Consumer->>DB: UPDATE ai_check_status=2/3<br/>has_violation, ai_check_result...
+    Consumer->>DB: UPDATE video_clip 切片级AI字段
+    Consumer->>DB: 全部切片完成 → 聚合写回 camera_management
     UI->>DB: 列表查询 + 展示 AI 报告
 ```
 
-### 5.3 Java 端：扫描入库与发 MQ
+### 5.3 Java 端：扫描入库与切割预处理
 
 #### 5.3.1 入口
 
@@ -304,7 +333,7 @@ sequenceDiagram
 ```java
 @Override
 public List<CameraManagement> scanInsertFromFolder(String folderPath) {
-    return scanInsertFromFolder(folderPath, true);  // 默认触发 AI
+    return scanInsertFromFolder(folderPath, true);  // 默认走切分预处理 + AI
 }
 
 @Override
@@ -317,59 +346,88 @@ public List<CameraManagement> scanInsertFromFolder(String folderPath, boolean tr
 public CameraManagement processAndUploadSingleVideo(String filePath, boolean triggerAiAnalysis) {
     // 1. 构建 CameraManagement（解析文件名→序列号/用户/拍摄时间，读取时长）
     // 2. 复制到临时文件 → OssClient.uploadSuffix() 上传 MinIO
-    // 3. INSERT camera_management + sys_oss
-    // 4. if (triggerAiAnalysis) sendUploadSuccessMessage(...)
-    //    else 跳过 AI MQ
+    // 3. if (triggerAiAnalysis) entity.setAiCheckStatus(1L);  // 检测中
+    //    INSERT camera_management + sys_oss
+    // 4. if (triggerAiAnalysis) sendClipPreprocessTask(...)   // 发切割任务（不再直发 AI）
+    //    else 跳过
 }
 ```
 
-**发 MQ（事务提交后）：**
+**发切割任务（事务提交后）：**
 
 ```java
-private void sendUploadSuccessMessage(CameraManagement camera, UploadResult uploadResult,
-                                      File file, OssClient ossClient) {
-    // 构建 VideoUploadMessage.Metadata（fileName, userName, recordTime...）
+private void sendClipPreprocessTask(CameraManagement camera, UploadResult uploadResult, OssClient ossClient) {
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                doSendMessage(...);  // 生成 24h presignedUrl → RabbitMQ
+                doSendClipTask(...);  // 生成 7 天 presignedUrl → videoClipMessageService.sendClipTask
             }
         });
     } else {
-        doSendMessage(...);
+        doSendClipTask(...);
     }
 }
 ```
 
-#### 5.3.3 消息体结构 `VideoUploadMessage`
+> 整段直发 AI 的 `sendVideoDetectionMessage` 仍保留在 `VideoMessageServiceImpl` 中（演示页同步分析等场景），但扫描链路已不再调用。
+
+#### 5.3.3 切片落库后逐片派发 AI 任务
+
+**文件：** `consumer/VideoClipResultConsumer.java`
+
+切割结果回传后，消费者根据 `camera_management.data_source` 区分链路：
+
+```java
+private void handleSuccess(VideoClipResult result) {
+    CameraManagement camera = cameraManagementMapper.selectById(result.getVideoId());
+    boolean scanChain = isScanChain(camera);   // dataSource == "scan"
+
+    if (clips.isEmpty()) {
+        if (scanChain) completeWithoutClips(videoId);  // 无人 → 直接置完成、无违规
+        return;
+    }
+    for (ClipInfo info : clips) {
+        // INSERT video_clip；scan 链路置 ai_check_status=1（检测中）
+    }
+    if (scanChain) {
+        dispatchAiTasksAfterCommit(camera, insertedClips, sourceFileName);
+        // 每个切片：重新生成 7 天预签名URL（失败回退 Python 回传URL）
+        // → videoMessageService.sendClipDetectionMessage(videoId, clipId, startSecond, ...)
+    }
+}
+
+private void handleFailure(VideoClipResult result) {
+    // INSERT 失败记录；scan 链路同时把原视频 ai_check_status 置 3（失败）
+}
+```
+
+#### 5.3.4 切片级 AI 任务消息 `VideoUploadMessage`
 
 ```java
 // domain/VideoUploadMessage.java
 {
-  "taskId": "VID-123-1716789012345",
+  "taskId": "VID-123-CLIP-456-1716789012345",
   "videoId": 123,
-  "presignedUrl": "http://minio:9000/zhifajiluyi/xxx?X-Amz-...",
+  "clipId": 456,            // 切片ID（切分预处理链路非空）
+  "clipStartSecond": 65.2,  // 切片在原视频中的起始秒
+  "presignedUrl": "http://minio:9000/zhifajiluyi/clips/...?X-Amz-...",
   "bucketName": "zhifajiluyi",
-  "objectName": "2026/05/27/xxx.mp4",
+  "objectName": "clips/2026/06/10/clip_123_0_xxx.mp4",
   "originalUrl": "...",
-  "createTime": "2026-05-27T10:00:00",
+  "createTime": "2026-06-10T10:00:00",
   "metadata": {
-    "videoCode": "Q541062",
+    "fileName": "Q541062_63_20250802160820_1000.mp4",  // 原视频文件名
     "userName": "张三",
-    "recordTime": "2025-08-02 16:08:20",
-    "fileName": "Q541062_63_20250802160820_1000.mp4",
-    "fileSize": 94371840,
-    "contentType": "video/mp4",
-    "originalPath": "\\\\192.168.124.52\\e\\20260314\\MP4\\xxx.mp4"
+    "fileSize": 9437184
   }
 }
 ```
 
-**发送实现：** `VideoMessageServiceImpl.sendVideoDetectionMessage()`
+**发送实现：** `VideoMessageServiceImpl.sendClipDetectionMessage()`
 
 ```java
-String taskId = "VID-" + videoId + "-" + System.currentTimeMillis();
+String taskId = "VID-" + videoId + "-CLIP-" + clipId + "-" + System.currentTimeMillis();
 rabbitTemplate.convertAndSend(videoUploadExchange, videoUploadRoutingKey, message);
 ```
 
@@ -405,11 +463,18 @@ def analyze_from_stream(self, task: VideoTaskMessage) -> VideoTaskResult:
     # Step 3: 从模型回复中鲁棒解析 JSON 事件列表
     events_data = self._parse_events(content)
 
-    # Step 4: Thinking 模型做安全合规二次审查
+    # Step 4: RAG 规章制度匹配 + Thinking 模型二次审查
     unsafe_events = self._analyze_safety_sync(events_data, fallback_events=events_data)
 
-    # Step 5: 若有违规，OpenCV 定位帧 + 可选截图
-    # Step 6: 返回 VideoTaskResult(success, events, unsafe_events, raw_analysis, ...)
+    # Step 5: 若有违规，OpenCV 定位帧 + 可选截图（用切片内相对时间抓帧）
+
+    # Step 6: 切分预处理链路 → 事件时间偏移回原视频时间轴
+    #         （须在抓帧之后执行；start/end_second 与 start/end_time 同步换算）
+    if task.clip_start_second:
+        self._apply_clip_offset(events_data, task.clip_start_second)
+        self._apply_clip_offset(unsafe_events, task.clip_start_second)
+
+    # Step 7: 返回 VideoTaskResult(success, clip_id, events, unsafe_events, raw_analysis, ...)
 ```
 
 **视觉模型 Prompt 要点（`ANALYSIS_PROMPT`）：**
@@ -437,18 +502,19 @@ def analyze_from_stream(self, task: VideoTaskMessage) -> VideoTaskResult:
 result_message = VideoAnalysisResultMessage(
     task_id=task_result.task_id,
     video_id=task_result.video_id,
+    clip_id=task_result.clip_id,  # 切片ID透传（整段直发时为 None）
     status="SUCCESS" if task_result.success else "FAILED",
     has_violation=bool(task_result.unsafe_events),
     violation_type=...,          # 从描述关键词推断
     ai_description=...,          # 优先 unsafe_events，兜底 events/raw_analysis
-    violation_start_second=...,  # 第一个违规事件
+    violation_start_second=...,  # 第一个违规事件（已偏移到原视频时间轴）
     screenshot_url=...,          # upload_screenshot → MinIO
     process_time=...
 )
 await exchange.publish(message, routing_key="video.result.finish")
 ```
 
-### 5.5 Java 端：结果消费与落库
+### 5.5 Java 端：切片级结果落库与聚合
 
 **文件：** `VideoResultConsumer.java`
 
@@ -459,39 +525,58 @@ public void handleVideoResult(VideoAnalysisResult result) {
 }
 ```
 
-**文件：** `VideoAiResultServiceImpl.java`
+**文件：** `VideoAiResultServiceImpl.java` — 按 `clipId` 是否为空走两条分支：
 
 ```java
-if (result.isSuccess()) {
-    update.setAiCheckStatus(2L);           // 检测完成
-    update.setAiCheckResult(wrapAsJson(result.getAiDescription()));
-    update.setHasViolation(result.hasViolationBehavior() ? 1 : 0);
-    update.setViolationType(result.getViolationType());
-    update.setViolationStartSecond(result.getViolationStartSecond());
-    update.setScreenshotUrl(result.getScreenshotUrl());
-    update.setProcessTime(result.getProcessTime());
-    update.setCheckTime(new Date());
-} else {
-    update.setAiCheckStatus(3L);           // 检测失败
-    update.setAiCheckResult(wrapAsJson("检测失败: " + result.getErrorMessage()));
+public void updateAnalysisResult(VideoAnalysisResult result) {
+    if (result.getClipId() != null) {
+        updateClipAnalysisResult(result);   // 切分预处理链路
+        return;
+    }
+    updateWholeVideoResult(result);         // 整段直发（演示页/历史消息），保留原逻辑
 }
-baseMapper.updateById(update);
 ```
+
+**切片级落库 + 聚合（`updateClipAnalysisResult` → `aggregateIfAllClipsDone`）：**
+
+1. 将结果写入 `video_clip` 切片级 AI 字段（成功置 `ai_check_status=2`，失败置 3 并记录错误）。
+2. 查询该 `videoId` 下所有有效切片（`clip_status=1`），若仍有切片处于 0/1 状态则等待。
+3. 全部完成后聚合写回 `camera_management`：
+   - `events_json`：合并各切片事件并按 `start_second` 排序（时间已由 Python 偏移到原视频时间轴）
+   - `has_violation` / `violation_type` / 违规起止秒 / `screenshot_url`：取时间轴上**首个违规切片**
+   - `process_time`：各切片耗时累加
+   - `ai_check_result`：各切片描述带「【切片N 时间区间】」标注后拼接
+   - 全部切片失败 → `ai_check_status=3`
 
 ### 5.6 AI 检测状态机
 
-| `ai_check_status` | 含义 | 典型触发点 |
-|-------------------|------|------------|
-| 0 | 未检测 | 刚入库，尚未发 MQ 或等待消费 |
-| 1 | 检测中 | （预留，可在发 MQ 时更新） |
-| 2 | 检测完成 | Python 回传 `SUCCESS` |
-| 3 | 检测失败 | Python 回传 `FAILED` 或解析/模型异常 |
+**原视频 `camera_management.ai_check_status`：**
+
+| 状态 | 含义 | 典型触发点 |
+|------|------|------------|
+| 0 | 未检测 | 非 scan 链路入库 |
+| 1 | 检测中 | scan 链路入库即置 1，覆盖「切割中 + 切片AI检测中」全过程 |
+| 2 | 检测完成 | 全部切片完成后聚合；或 0 切片（无人）直接置完成 |
+| 3 | 检测失败 | 切割预处理失败，或全部切片 AI 检测失败 |
+
+**切片 `video_clip.ai_check_status`：**
+
+| 状态 | 含义 |
+|------|------|
+| 0 | 待检测（纯切割链路的切片恒为 0） |
+| 1 | 检测中（scan 链路切片落库即置 1 并发 AI 任务） |
+| 2 | 检测完成 |
+| 3 | 检测失败 |
 
 ---
 
 ## 6. 视频人体切割 — 完整实现逻辑
 
 ### 6.1 业务目标
+
+切割能力被两条链路复用：
+- **AI 检测链路（`dataSource=scan`）**：切割作为预处理，切片落库后自动逐片发 AI 任务（见第 5 章）。
+- **纯切割链路（`dataSource=clip`，本章主线）**：仅切割，不触发 AI。
 
 对 **长执法视频（约 20 分钟）** 自动处理：
 1. 扫描 NAS/本地文件夹，原视频上传 MinIO 并入库（**不跑 AI**）
@@ -592,7 +677,7 @@ public int scanAndSubmitClipTasks(String folderPath) {
         // 2. 标记 dataSource = "clip"（字典：视频切割扫描）
         cameraManagementMapper.updateById(update);
 
-        // 3. ossId → RemoteFile → presignedUrl（24h）
+        // 3. ossId → RemoteFile → presignedUrl（7天）
         String presignedUrl = generatePresignedUrl(camera);
 
         // 4. 发切割 MQ
@@ -683,7 +768,10 @@ def process_clip_task(video_id, task_id, presigned_url, ...):
 
 ```java
 private void handleSuccess(VideoClipResult result) {
-    String sourceFileName = resolveSourceFileName(result.getVideoId());
+    CameraManagement camera = cameraManagementMapper.selectById(result.getVideoId());
+    boolean scanChain = isScanChain(camera);   // dataSource == "scan" 时为 AI 预处理链路
+
+    String sourceFileName = resolveSourceFileName(camera, result.getVideoId());
     int sourceClipCount = clips.size();
 
     for (ClipInfo info : clips) {
@@ -693,8 +781,17 @@ private void handleSuccess(VideoClipResult result) {
         entity.setClipIndex(info.getClipIndex());
         entity.setObjectName(info.getObjectName());
         entity.setClipStatus(1);
+        if (scanChain) {
+            entity.setAiCheckStatus(1);        // 待发 AI 任务，标记检测中
+        }
         videoClipMapper.insert(entity);
     }
+
+    if (scanChain) {
+        // 事务提交后逐片发 AI 检测任务（clipId + clipStartSecond + 7天预签名URL）
+        dispatchAiTasksAfterCommit(camera, insertedClips, sourceFileName);
+    }
+    // 纯切割链路（dataSource=clip）到此为止，不触发 AI
 }
 ```
 
@@ -720,26 +817,30 @@ private String resolveSourceFileName(Long videoId) {
 
 ## 7. 两条链路的对比与隔离
 
-| 维度 | AI 违规检测 | 视频人体切割 |
-|------|-------------|--------------|
-| 触发 | `scanInsertFromFolder(path, true)` | `scanInsertFromFolder(path, false)` + 发切割 MQ |
-| MQ 任务队列 | `video.upload.queue` | `video.clip.queue` |
-| MQ 结果队列 | `video.result.queue` | `video.clip.result.queue` |
-| Python 入口 | `mq_consumer` → `stream_analyzer` | `clip_mq_consumer` → `video_clipper` |
-| 核心算法 | 视觉大模型 + Thinking 模型 | YOLO 人体检测 + FFmpeg |
-| 结果表 | `camera_management` | `video_clip` |
+| 维度 | AI 违规检测（含切分预处理） | 纯视频人体切割 |
+|------|------------------------------|----------------|
+| 触发 | `scanInsertFromFolder(path, true)` → 发切割 MQ → 切片自动逐片发 AI | `scanInsertFromFolder(path, false)` + 发切割 MQ |
+| MQ 链路 | `video.clip.queue` → `video.clip.result.queue` → `video.upload.queue` → `video.result.queue` | `video.clip.queue` → `video.clip.result.queue` |
+| Python 入口 | `clip_mq_consumer` → `video_clipper`，随后 `mq_consumer` → `stream_analyzer` | `clip_mq_consumer` → `video_clipper` |
+| 核心算法 | YOLO 切分 + 视觉大模型 + RAG/Thinking 模型 | YOLO 人体检测 + FFmpeg |
+| 结果表 | 切片级 `video_clip`，聚合后 `camera_management` | `video_clip` |
 | 数据来源标签 | `dataSource=scan` | `dataSource=clip` |
-| 前端页面 | 检测记录 `fileRecord` | 视频切割 `videoClip` |
-| 是否适合长视频直接处理 | 是（但耗时长、成本高） | 先切短再（未来）做 LLM |
+| 前端页面 | 检测记录 `fileRecord`（聚合结果）+ 视频切割 `videoClip`（切片） | 视频切割 `videoClip` |
+| 长视频处理方式 | 先切短再逐片 LLM（无人部分不进大模型） | 仅切短 |
 
-**隔离关键代码：**
+**链路区分关键代码：**
 
 ```java
-// VideoScanUploadServiceImpl.java
+// VideoScanUploadServiceImpl.java — 是否进入 AI 链路
 if (triggerAiAnalysis) {
-    sendUploadSuccessMessage(entity, uploadResult, sourceFile, currentClient);
+    sendClipPreprocessTask(entity, uploadResult, currentClient);  // 发切割任务
 } else {
-    log.info("已跳过 AI 检测 MQ：videoId={}", entity.getVideoId());
+    log.info("已跳过切割预处理 MQ：videoId={}", entity.getVideoId());
+}
+
+// VideoClipResultConsumer.java — 切完之后是否逐片发 AI
+private boolean isScanChain(CameraManagement camera) {
+    return camera != null && "scan".equalsIgnoreCase(camera.getDataSource());
 }
 ```
 
@@ -747,25 +848,25 @@ if (triggerAiAnalysis) {
 
 ## 8. SnailJob 定时任务
 
-### 8.1 执法视频扫描（AI 检测链路）
+### 8.1 执法视频扫描（AI 检测链路，主任务）
 
 | 配置项 | 值 |
 |--------|-----|
 | 执行器 | `cameraManagementJobExecutor` |
 | 类 | `CameraManagementJobExecutor` |
 | Dubbo 服务 | `ICameraManagementDubboService.scanInsertFromFolder` |
-| 默认路径 | 代码硬编码 `D:\执法记录仪` |
-| AI | **默认触发** |
+| 默认路径 | 任务参数 > Nacos `camera.scan.target-folder` > 默认 `D:\执法记录仪` |
+| 行为 | 扫描入库 → 发切割任务 → 切片自动逐片 AI 检测 → 聚合（**全流程串联，日常只需此任务**） |
 
-### 8.2 视频切割扫描
+### 8.2 视频切割扫描（纯切割，可选）
 
 | 配置项 | 值 |
 |--------|-----|
 | 执行器 | `videoClipScanJobExecutor` |
 | 类 | `VideoClipScanJobExecutor` |
 | Dubbo 服务 | `IVideoClipScanDubboService.scanAndSubmitClipTasks` |
-| 默认路径 | Nacos `camera.clip-scan.target-folder` |
-| AI | **不触发** |
+| 默认路径 | 任务参数 > Nacos `camera.clip-scan.target-folder` |
+| 行为 | 仅切割入库（`dataSource=clip`），**不触发 AI**；仅在需要"只切片不检测"时使用 |
 
 **Nacos `ruoyi-job.yml` 示例：**
 
@@ -917,14 +1018,14 @@ yolo_device = "cpu"
 
 | 文件 | 职责 |
 |------|------|
-| `service/impl/VideoScanUploadServiceImpl.java` | 文件夹扫描、MinIO 上传、可选 AI MQ |
-| `service/impl/VideoMessageServiceImpl.java` | 发送 AI 检测任务 |
+| `service/impl/VideoScanUploadServiceImpl.java` | 文件夹扫描、MinIO 上传、scan 链路发切割预处理任务 |
+| `service/impl/VideoMessageServiceImpl.java` | 发送 AI 检测任务（整段直发 + 切片级 `sendClipDetectionMessage`） |
 | `service/impl/VideoClipMessageServiceImpl.java` | 发送切割任务 |
-| `service/impl/VideoClipScanServiceImpl.java` | 切割定时扫描编排 |
-| `service/impl/VideoAiResultServiceImpl.java` | AI 结果写回 DB |
+| `service/impl/VideoClipScanServiceImpl.java` | 纯切割定时扫描编排 |
+| `service/impl/VideoAiResultServiceImpl.java` | AI 结果写回：切片级落库 + 全部完成后聚合写回 `camera_management` |
 | `service/impl/VideoClipServiceImpl.java` | 切片 CRUD、URL 刷新 |
 | `consumer/VideoResultConsumer.java` | AI 结果 MQ 消费者 |
-| `consumer/VideoClipResultConsumer.java` | 切割结果 MQ 消费者 |
+| `consumer/VideoClipResultConsumer.java` | 切割结果 MQ 消费者；scan 链路逐片派发 AI 任务 |
 | `config/VideoMqConfig.java` | 四套 MQ 拓扑声明 |
 | `dubbo/RemoteVideoClipScanServiceImpl.java` | 切割扫描 Dubbo 暴露 |
 
@@ -964,16 +1065,18 @@ yolo_device = "cpu"
 |------|------|
 | `script/sql/add_video_clip.sql` | 建表 + 菜单 + 字典 |
 | `script/sql/update_video_clip_source_info.sql` | 原视频文件名/切片数字段 |
+| `script/sql/add_video_clip_ai_fields.sql` | 切片级 AI 检测字段（切分预处理链路） |
 
 ---
 
 ## 附录 B：后续扩展建议
 
-1. **切割后再做 LLM**：对 `video_clip` 中短片段批量发 AI 检测 MQ，降低长视频分析成本。
-2. **切割 0 片段落库**：当前无人片段仅打日志不落库，可增加「已处理但无人体」记录便于审计。
-3. **任务进度**：切割过程中向 DB 写入 `clip_status=0` 的处理中记录，前端可展示进度。
-4. **路径配置统一**：`CameraManagementJobExecutor` 硬编码路径可改为 Nacos 配置，与切割任务一致。
+1. ~~切割后再做 LLM~~：**已实现**——scan 链路切片落库后自动逐片发 AI 检测，结果聚合写回原视频。
+2. **切割 0 片段落库**：scan 链路 0 切片时已直接将原视频置「完成、无违规」；纯切割链路仍仅打日志，可增加「已处理但无人体」记录便于审计。
+3. **任务进度**：切割过程中向 DB 写入 `clip_status=0` 的处理中记录，前端可展示切割/检测进度（如「已完成 3/7 片」）。
+4. **切片级结果展示**：前端视频切割页可增加切片 AI 状态/违规列，展示 `video_clip` 新增的 AI 字段。
+5. **数据闭环**：误报/违规切片数据落库保存，用于模型增量式微调。
 
 ---
 
-*文档版本：2026-05-27 · 与当前代码库实现保持一致*
+*文档版本：2026-06-10 · 与当前代码库实现保持一致（切分作为 AI 检测预处理）*
