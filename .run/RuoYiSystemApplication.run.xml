@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="RuoYiSystemApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="ruoyi-system" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="org.dromara.system.RuoYiSystemApplication" />
+    <option name="SHORTEN_COMMAND_LINE" value="MANIFEST" />
+    <method v="2" />
+  </configuration>
+</component>
